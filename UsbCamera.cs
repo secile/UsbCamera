@@ -13,7 +13,7 @@ namespace GitHub.secile.Video
     // if (devices.Length == 0) return; // no camera.
     //
     // /* for debugging. */
-    // var formats = My.Video.UsbCamera.GetVideoFormat(0);
+    // var formats = UsbCamera.GetVideoFormat(0);
     // foreach (var item in formats) Console.WriteLine(item);
     //
     // /* create usb camera and start. */
