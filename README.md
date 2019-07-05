@@ -24,6 +24,13 @@ int fps = 10;
 var timer = new System.Timers.Timer(1000.0 / fps) { SynchronizingObject = this };
 timer.Elapsed += (s, ev) => pbxImage.Image = camera.GetBitmap();
 timer.Start();
+
+// Release resources.
+myForm.FormClosing += (s, ev) =>
+{
+    timer.Stop();
+    camera.Release();
+};
 ```
 
 # No need external library.
