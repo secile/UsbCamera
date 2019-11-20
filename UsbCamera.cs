@@ -12,42 +12,42 @@ namespace GitHub.secile.Video
     // string[] devices = UsbCamera.FindDevices();
     // if (devices.Length == 0) return; // no camera.
     //
-    // /* for debugging. */
-    // var formats = UsbCamera.GetVideoFormat(0);
+    // check format.
+    // UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(0);
     // foreach (var item in formats) Console.WriteLine(item);
     //
-    // /* create usb camera and start. */
+    // create usb camera and start.
     // var index = 0;
-    // var camera = new UsbCamera(index, new Size(640, 480));
+    // var camera = new UsbCamera(index, formats[0]);
     // camera.Start();
     //
-    // /* wait a few seconds until image buffer filled. */
-    //
-    // /* get image. */
+    // get image.
+    // Immediately after starting the USB camera,
+    // GetBitmap() fails because image buffer is not prepared yet.
     // var bmp = camera.GetBitmap();
-
+    
     class UsbCamera
     {
         /// <summary>Usb camera image size.</summary>
         public Size Size { get; private set; }
 
-        /// <summary>Start using.</summary>
+        /// <summary>Start.</summary>
         public Action Start { get; private set; }
 
-        /// <summary>Stop using.</summary>
+        /// <summary>Stop.</summary>
         public Action Stop { get; private set; }
 
         /// <summary>Release resource.</summary>
         public Action Release { get; private set; }
 
         /// <summary>Get image.</summary>
-        /// <remarks>Immediately after starting, images may not be acquired.</remarks>
+        /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
         public Func<Bitmap> GetBitmap { get; private set; }
 
         /// <summary>
         /// Get available USB camera list.
         /// </summary>
-        /// <returns>Array of camera name, or if no device found, zero length array/</returns>
+        /// <returns>Array of camera name, or if no device found, zero length array.</returns>
         public static string[] FindDevices()
         {
             return DirectShow.GetFiltes(DirectShow.DsGuid.CLSID_VideoInputDeviceCategory).ToArray();
@@ -64,21 +64,35 @@ namespace GitHub.secile.Video
         }
 
         /// <summary>
-        /// Create USB Camera.
+        /// Create USB Camera. If device do not support the size, default size will applied.
         /// </summary>
         /// <param name="cameraIndex">Camera index in FindDevices() result.</param>
         /// <param name="size">
-        /// Size you want to create. If camera does not support the size, created with default size.
-        /// Check Size property to know actual created size.
+        /// Size you want to create. Normally use Size property of VideoFormat in GetVideoFormat() result.
         /// </param>
-        public UsbCamera(int cameraIndex, Size size)
+        public UsbCamera(int cameraIndex, Size size) : this(cameraIndex, new VideoFormat() { Size = size })
         {
-            var camera_list = FindDevices();
-            if (cameraIndex >= camera_list.Length) throw new ArgumentException("USB camera is not available.", "index");
-            Init(cameraIndex, size);
         }
 
-        private void Init(int index, Size size)
+        /// <summary>
+        /// Create USB Camera. If device do not support the format, default format will applied.
+        /// </summary>
+        /// <param name="cameraIndex">Camera index in FindDevices() result.</param>
+        /// <param name="format">
+        /// Normally use GetVideoFormat() result.
+        /// You can change TimePerFrame value from Caps.MinFrameInterval to Caps.MaxFrameInterval.
+        /// TimePerFrame = 10,000,000 / frame duration. (ex: 333333 in case 30fps).
+        /// You can change Size value in case Caps.MaxOutputSize > Caps.MinOutputSize and OutputGranularityX/Y is not zero.
+        /// Size = any value from Caps.MinOutputSize to Caps.MaxOutputSize step with OutputGranularityX/Y.
+        /// </param>
+        public UsbCamera(int cameraIndex, VideoFormat format)
+        {
+            var camera_list = FindDevices();
+            if (cameraIndex >= camera_list.Length) throw new ArgumentException("USB camera is not available.", "cameraIndex");
+            Init(cameraIndex, format);
+        }
+
+        private void Init(int index, VideoFormat format)
         {
             //----------------------------------
             // Create Filter Graph
@@ -93,7 +107,7 @@ namespace GitHub.secile.Video
             //----------------------------------
             // VideoCaptureSource
             //----------------------------------
-            var vcap_source = CreateVideoCaptureSource(index, size);
+            var vcap_source = CreateVideoCaptureSource(index, format);
             graph.AddFilter(vcap_source, "VideoCapture");
 
             //------------------------------
@@ -235,51 +249,133 @@ namespace GitHub.secile.Video
         /// <summary>
         /// Video Capture Sourceフィルタを作成する
         /// </summary>
-        private DirectShow.IBaseFilter CreateVideoCaptureSource(int index, Size size)
+        private DirectShow.IBaseFilter CreateVideoCaptureSource(int index, VideoFormat format)
         {
             var filter = DirectShow.CreateFilter(DirectShow.DsGuid.CLSID_VideoInputDeviceCategory, index);
             var pin = DirectShow.FindPin(filter, 0, DirectShow.PIN_DIRECTION.PINDIR_OUTPUT);
-            SetVideoOutputFormat(pin, size, 0);
+            SetVideoOutputFormat(pin, format);
             return filter;
         }
 
         /// <summary>
         /// ビデオキャプチャデバイスの出力形式を選択する。
-        /// フォーマットの列挙で同サイズがあれば、そのフォーマットを設定する。
-        /// 存在しなかった場合は出力形式を変更しない。
         /// </summary>
-        /// <param name="pin">ビデオキャプチャデバイスの出力ピン</param>
-        /// <param name="size">指定のサイズ</param>
-        /// <param name="fps">フレームレートを指定する。0のとき変更しない(デフォルト)。</param>
-        private static bool SetVideoOutputFormat(DirectShow.IPin pin, Size size, double fps)
+        private static void SetVideoOutputFormat(DirectShow.IPin pin, VideoFormat format)
         {
-            var vformat = GetVideoOutputFormat(pin);
+            var formats = GetVideoOutputFormat(pin);
 
-            for (int i = 0; i < vformat.Length; i++)
+            // 仕様ではVideoCaptureDeviceはメディア タイプごとに一定範囲の出力フォーマットをサポートできる。例えば以下のように。
+            // [0]:YUY2 最小:160x120, 最大:320x240, X軸4STEP, Y軸2STEPごと
+            // [1]:RGB8 最小:640x480, 最大:640x480, X軸0STEP, Y軸0STEPごと
+            // SetFormatで出力サイズとフレームレートをこの範囲内で設定可能。
+            // ただし試した限り、手持ちのUSBカメラはすべてサイズ固定(最大・最小が同じ)で返してきた。
+
+            // https://msdn.microsoft.com/ja-jp/windows/dd407352(v=vs.80)
+            // VIDEO_STREAM_CONFIG_CAPSの以下を除くほとんどのメンバーはdeprecated(非推奨)である。
+            // アプリケーションはその他のメンバーの利用を避けること。かわりにIAMStreamConfig::GetFormatを利用すること。
+            // - Guid:FORMAT_VideoInfo or FORMAT_VideoInfo2など。
+            // - VideoStandard:アナログTV信号のフォーマット(NTSC, PALなど)をAnalogVideoStandard列挙体で指定する。
+            // - MinFrameInterval, MaxFrameInterval:ビデオキャプチャデバイスがサポートするフレームレートの範囲。100ナノ秒単位。
+
+            // 上記によると、VIDEO_STREAM_CONFIG_CAPSは現在はdeprecated(非推奨)であるらしい。かわりにIAMStreamConfig::GetFormatを使用することらしい。
+            // 上記仕様を守ったデバイスは出力サイズを固定で返すが、守ってない古いデバイスは出力サイズを可変で返す、と考えられる。
+            // 参考までに、VIDEO_STREAM_CONFIG_CAPSで解像度・クロップサイズ・フレームレートなどを変更する手順は以下の通り。
+
+            // ①フレームレート(これは非推奨ではない)
+            // VIDEO_STREAM_CONFIG_CAPS のメンバ MinFrameInterval と MaxFrameInterval は各ビデオ フレームの最小の長さと最大の長さである。
+            // 次の式を使って、これらの値をフレーム レートに変換できる。
+            // frames per second = 10,000,000 / frame duration
+
+            // 特定のフレーム レートを要求するには、メディア タイプにある構造体 VIDEOINFOHEADER か VIDEOINFOHEADER2 の AvgTimePerFrame の値を変更する。
+            // デバイスは最小値と最大値の間で可能なすべての値はサポートしていないことがあるため、ドライバは使用可能な最も近い値を使う。
+
+            // ②Cropping(画像の一部切り抜き)
+            // MinCroppingSize = (160, 120) // Cropping最小サイズ。
+            // MaxCroppingSize = (320, 240) // Cropping最大サイズ。
+            // CropGranularityX = 4         // 水平方向細分度。
+            // CropGranularityY = 8         // 垂直方向細分度。
+            // CropAlignX = 2               // the top-left corner of the source rectangle can sit.
+            // CropAlignY = 4               // the top-left corner of the source rectangle can sit.
+
+            // ③出力サイズ
+            // https://msdn.microsoft.com/ja-jp/library/cc353344.aspx
+            // https://msdn.microsoft.com/ja-jp/library/cc371290.aspx
+            // VIDEO_STREAM_CONFIG_CAPS 構造体は、このメディア タイプに使える最小と最大の幅と高さを示す。
+            // また、"ステップ" サイズ"も示す。ステップ サイズは、幅または高さを調整できるインクリメントの値を定義する。
+            // たとえば、デバイスは次の値を返すことがある。
+            // MinOutputSize: 160 × 120
+            // MaxOutputSize: 320 × 240
+            // OutputGranularityX:8 ピクセル (水平ステップ サイズ)
+            // OutputGranularityY:8 ピクセル (垂直ステップ サイズ)
+            // これらの数値が与えられると、幅は範囲内 (160、168、176、... 304、312、320) の任意の値に、
+            // 高さは範囲内 (120、128、136、... 224、232、240) の任意の値に設定できる。
+
+            // 出力サイズの可変のUSBカメラがないためデバッグするには以下のコメントを外す。
+            // I have no USB camera of variable output size, uncomment below to debug.
+            //size = new Size(168, 126);
+            //vformat[0].Caps = new DirectShow.VIDEO_STREAM_CONFIG_CAPS()
+            //{
+            //    Guid = DirectShow.DsGuid.FORMAT_VideoInfo,
+            //    MinOutputSize = new DirectShow.SIZE() { cx = 160, cy = 120 },
+            //    MaxOutputSize = new DirectShow.SIZE() { cx = 320, cy = 240 },
+            //    OutputGranularityX = 4,
+            //    OutputGranularityY = 2
+            //};
+
+            // VIDEO_STREAM_CONFIG_CAPSは現在では非推奨。まずは固定サイズを探す
+            // VIDEO_STREAM_CONFIG_CAPS is deprecated. First, find just the fixed size.
+            for (int i = 0; i < formats.Length; i++)
             {
-                if (vformat[i].MajorType == DirectShow.DsGuid.GetNickname(DirectShow.DsGuid.MEDIATYPE_Video))
+                var item = formats[i];
+
+                // VideoInfoのみ対応する。(VideoInfo2はSampleGrabber未対応のため)
+                // VideoInfo only... (SampleGrabber do not support VideoInfo2)
+                // https://msdn.microsoft.com/ja-jp/library/cc370616.aspx
+                if (item.MajorType != DirectShow.DsGuid.GetNickname(DirectShow.DsGuid.MEDIATYPE_Video)) continue;
+                if (string.IsNullOrEmpty(format.SubType) == false && format.SubType != item.SubType) continue;
+                if (item.Caps.Guid != DirectShow.DsGuid.FORMAT_VideoInfo) continue;
+
+                if (item.Size.Width == format.Size.Width && item.Size.Height == format.Size.Height)
                 {
-                    // MajorTypeがVideoの場合、SubTypeは色空間を表す。
-                    // BuffaloのWebカメラは[YUY2]と[MPEG]だった。
-                    // マイクロビジョンのUSBカメラは[YUY2]と[YUVY]だった。
-                    // 固定できないためコメントアウト。最初に見つかったフォーマットを利用する。
-                    // if (vformat[i].SubType == DSUtility.GetMediaTypeName(DSConst.MediaTypeGUID.MEDIASUBTYPE_YUY2))
+                    SetVideoOutputFormat(pin, i, format.Size, format.TimePerFrame);
+                    return;
+                }
+            }
 
-                    // FORMAT_VideoInfoのみ対応する。(FORMAT_VideoInfo2はSampleGrabber未対応のためエラー。)
-                    // https://msdn.microsoft.com/ja-jp/library/cc370616.aspx
+            // 固定サイズが見つからなかった。可変サイズの範囲を探す。
+            // Not found fixed size, search for variable size.
+            for (int i = 0; i < formats.Length; i++)
+            {
+                var item = formats[i];
 
-                    if (vformat[i].Caps.Guid == DirectShow.DsGuid.FORMAT_VideoInfo)
+                // VideoInfoのみ対応する。(VideoInfo2はSampleGrabber未対応のため)
+                // VideoInfo only... (SampleGrabber do not support VideoInfo2)
+                // https://msdn.microsoft.com/ja-jp/library/cc370616.aspx
+                if (item.MajorType != DirectShow.DsGuid.GetNickname(DirectShow.DsGuid.MEDIATYPE_Video)) continue;
+                if (string.IsNullOrEmpty(format.SubType) == false && format.SubType != item.SubType) continue;
+                if (item.Caps.Guid != DirectShow.DsGuid.FORMAT_VideoInfo) continue;
+
+                if (item.Caps.OutputGranularityX == 0) continue;
+                if (item.Caps.OutputGranularityY == 0) continue;
+
+                for (int w = item.Caps.MinOutputSize.cx; w < item.Caps.MaxOutputSize.cx; w += item.Caps.OutputGranularityX)
+                {
+                    for (int h = item.Caps.MinOutputSize.cy; h < item.Caps.MaxOutputSize.cy; h += item.Caps.OutputGranularityY)
                     {
-                        if (vformat[i].Size.Width == size.Width && vformat[i].Size.Height == size.Height)
+                        if (w == format.Size.Width && h == format.Size.Height)
                         {
-                            SetVideoOutputFormat(pin, i, size, fps);
-                            return true;
+                            SetVideoOutputFormat(pin, i, format.Size, format.TimePerFrame);
+                            return;
                         }
                     }
                 }
             }
-            return false;
+
+            // サイズが見つかなかった場合はデフォルトサイズとする。
+            // Not found, use default size.
+            SetVideoOutputFormat(pin, 0, Size.Empty, 0);
         }
+
 
         /// <summary>
         /// ビデオキャプチャデバイスがサポートするメディアタイプ・サイズを取得する。
@@ -290,7 +386,7 @@ namespace GitHub.secile.Video
             var config = pin as DirectShow.IAMStreamConfig;
             if (config == null)
             {
-                throw new Exception("IAMStreamConfigインタフェースを取得できません。");
+                throw new InvalidOperationException("IAMStreamConfigインタフェースを取得できません。");
             }
 
             // フォーマット個数取得
@@ -298,7 +394,7 @@ namespace GitHub.secile.Video
             config.GetNumberOfCapabilities(ref cap_count, ref cap_size);
             if (cap_size != Marshal.SizeOf(typeof(DirectShow.VIDEO_STREAM_CONFIG_CAPS)))
             {
-                throw new Exception("IAMStreamConfigインタフェースを取得できません。");
+                throw new InvalidOperationException("IAMStreamConfigインタフェースを取得できません。");
             }
 
             // 返却値の確保
@@ -353,14 +449,14 @@ namespace GitHub.secile.Video
         /// </summary>
         /// <param name="index">希望のindexを指定する</param>
         /// <param name="size">Empty以外を指定すると出力サイズを変更する。事前にVIDEO_STREAM_CONFIG_CAPSで取得した可能範囲内を指定すること。</param>
-        /// <param name="fps">0以上を指定するとフレームレートを変更する。事前にVIDEO_STREAM_CONFIG_CAPSで取得した可能範囲内を指定すること。</param>
-        private static void SetVideoOutputFormat(DirectShow.IPin pin, int index, Size size, double fps)
+        /// <param name="timePerFrame">0以上を指定するとフレームレートを変更する。事前にVIDEO_STREAM_CONFIG_CAPSで取得した可能範囲内を指定すること。</param>
+        private static void SetVideoOutputFormat(DirectShow.IPin pin, int index, Size size, long timePerFrame)
         {
             // IAMStreamConfigインタフェース取得
             var config = pin as DirectShow.IAMStreamConfig;
             if (config == null)
             {
-                throw new Exception("ピンはIAMStreamConfigインタフェースを公開しません。");
+                throw new InvalidOperationException("ピンはIAMStreamConfigインタフェースを公開しません。");
             }
 
             // フォーマット個数取得
@@ -368,7 +464,7 @@ namespace GitHub.secile.Video
             config.GetNumberOfCapabilities(ref cap_count, ref cap_size);
             if (cap_size != Marshal.SizeOf(typeof(DirectShow.VIDEO_STREAM_CONFIG_CAPS)))
             {
-                throw new Exception("VIDEO_STREAM_CONFIG_CAPSを取得できません。");
+                throw new InvalidOperationException("VIDEO_STREAM_CONFIG_CAPSを取得できません。");
             }
 
             // データ用領域確保
@@ -378,26 +474,19 @@ namespace GitHub.secile.Video
             DirectShow.AM_MEDIA_TYPE mt = null;
             config.GetStreamCaps(index, ref mt, cap_data);
             var cap = PtrToStructure<DirectShow.VIDEO_STREAM_CONFIG_CAPS>(cap_data);
-            // 仕様ではVideoCaptureDeviceはメディア タイプごとに一定範囲の出力フォーマットをサポートできる。例えば以下のように。
-            // [0]:YUY2 最小:160x120, 最大:320x240, X軸4STEP, Y軸2STEPごと
-            // [1]:RGB8 最小:640x480, 最大:640x480, X軸0STEP, Y軸0STEPごと
-            // SetFormatで出力サイズとフレームレートをこの範囲内で設定可能。
-            // ただし試した限り、ほとんどのUSBカメラはサイズ固定(最大・最小が同じ)で返してきた。
-            // https://msdn.microsoft.com/ja-jp/library/cc353344.aspx
-            // https://msdn.microsoft.com/ja-jp/library/cc371290.aspx
-
+            
             if (mt.FormatType == DirectShow.DsGuid.FORMAT_VideoInfo)
             {
                 var vinfo = PtrToStructure<DirectShow.VIDEOINFOHEADER>(mt.pbFormat);
                 if (!size.IsEmpty) { vinfo.bmiHeader.biWidth = size.Width; vinfo.bmiHeader.biHeight = size.Height; }
-                if (fps > 0) { vinfo.AvgTimePerFrame = (long)(10000000 / fps); }
+                if (timePerFrame > 0) { vinfo.AvgTimePerFrame = timePerFrame; }
                 Marshal.StructureToPtr(vinfo, mt.pbFormat, true);
             }
             else if (mt.FormatType == DirectShow.DsGuid.FORMAT_VideoInfo2)
             {
                 var vinfo = PtrToStructure<DirectShow.VIDEOINFOHEADER2>(mt.pbFormat);
                 if (!size.IsEmpty) { vinfo.bmiHeader.biWidth = size.Width; vinfo.bmiHeader.biHeight = size.Height; }
-                if (fps > 0) { vinfo.AvgTimePerFrame = (long)(10000000 / fps); }
+                if (timePerFrame > 0) { vinfo.AvgTimePerFrame = timePerFrame; }
                 Marshal.StructureToPtr(vinfo, mt.pbFormat, true);
             }
 
@@ -525,7 +614,7 @@ namespace GitHub.secile.Video
                 }
             });
 
-            if (result == null) throw new Exception("can't create filter.");
+            if (result == null) throw new ArgumentException("can't create filter.");
             return result;
         }
 
@@ -592,7 +681,7 @@ namespace GitHub.secile.Video
                 return (info.achName == name);
             });
 
-            if (result == null) throw new Exception("can't fild pin.");
+            if (result == null) throw new ArgumentException("can't fild pin.");
             return result;
         }
 
@@ -609,7 +698,7 @@ namespace GitHub.secile.Video
                 return (index == curr_index++);
             });
 
-            if (result == null) throw new Exception("can't fild pin.");
+            if (result == null) throw new ArgumentException("can't fild pin.");
             return result;
         }
 
@@ -1217,4 +1306,3 @@ namespace GitHub.secile.Video
         #endregion
     }
 }
-
