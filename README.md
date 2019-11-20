@@ -34,6 +34,35 @@ this.FormClosing += (s, ev) => timer.Stop();
 this.FormClosing += (s, ev) => camera.Stop();
 ```
 
+# Manipulates camera control and video processing amplifier.
+```C#
+// show properties this camera supports.
+// [Pan, Tilt, Roll, Zoom, Exposure, Iris, Focus]
+foreach (var item in camera.Properties.CameraControl) Console.WriteLine("{0}:{1}", item.Key, item.Value);
+// [Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain]
+foreach (var item in camera.Properties.VideoProcAmp) Console.WriteLine("{0}:{1}", item.Key, item.Value);
+
+// get property min, max, default, step value, and set new value.
+if (camera.Properties.VideoProcAmp.ContainsKey(DirectShow.VideoProcAmpProperty.Brightness))
+{
+    var min = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Min;
+    var max = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Max;
+    var def = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Default;
+    var step = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Step;
+    camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Set(DirectShow.CameraControlFlags.Manual, max);
+}
+
+// set property value to auto.
+if (camera.Properties.CameraControl.ContainsKey(DirectShow.CameraControlProperty.Exposure))
+{
+    var flags = camera.Properties.CameraControl[DirectShow.CameraControlProperty.Exposure].Flags;
+    if ((flags & DirectShow.CameraControlFlags.Auto) == DirectShow.CameraControlFlags.Auto)
+    {
+        camera.Properties.CameraControl[DirectShow.CameraControlProperty.Exposure].Set(DirectShow.CameraControlFlags.Auto, 0);
+    }
+}
+```
+
 # No need external library.
 Previos version, this project used external library.
 But now, no need to add external library to your project.
