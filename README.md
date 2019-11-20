@@ -5,32 +5,33 @@ With only single CSharp source code. No need external library.
 # How to use
 Add UsbCamera.cs to your project.    
 ```C#
+// [How to use]
 // check USB camera is available.
-string[] devices = UsbCamera.FindDevice();
+string[] devices = UsbCamera.FindDevices();
 if (devices.Length == 0) return; // no camera.
-
-// create USB camera and start.
+            
+// check format.
+UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(0);
+foreach (var item in formats) Console.WriteLine("{0}-{1}", Array.IndexOf(formats, item), item);
+            
+// create usb camera and start.
 var index = 0;
-var camera = new UsbCamera(index, new Size(640, 480));
+var camera = new UsbCamera(index, formats[0]);
 camera.Start();
-
-// [wait a few seconds until image buffer filled.]
-
+            
 // get image.
+// Immediately after starting the USB camera,
+// GetBitmap() fails because image buffer is not prepared yet.
 var bmp = camera.GetBitmap();
-
-// If you want to display image in PictureBox
-int fps = 10;
-var timer = new System.Timers.Timer(1000.0 / fps) { SynchronizingObject = this };
-timer.Elapsed += (s, ev) => pbxImage.Image = camera.GetBitmap();
+            
+// show image in PictureBox.
+var timer = new System.Timers.Timer(100) { SynchronizingObject = this };
+timer.Elapsed += (s, ev) => pbxScreen.Image = camera.GetBitmap();
 timer.Start();
 
-// Release resources.
-myForm.FormClosing += (s, ev) =>
-{
-    timer.Stop();
-    camera.Release();
-};
+// release resource when close.
+this.FormClosing += (s, ev) => timer.Stop();
+this.FormClosing += (s, ev) => camera.Stop();
 ```
 
 # No need external library.
