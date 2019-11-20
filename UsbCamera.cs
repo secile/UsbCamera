@@ -147,7 +147,7 @@ namespace GitHub.secile.Video
                 GetBitmap = () => GetBitmapMain(i_grabber, width, height, stride);
             }
 
-            // Assign Delegates
+            // Assign Delegates.
             Start = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Running);
             Stop = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Stopped);
             Release = () =>
@@ -158,6 +158,75 @@ namespace GitHub.secile.Video
                 DirectShow.ReleaseInstance(ref builder);
                 DirectShow.ReleaseInstance(ref graph);
             };
+
+            // Property Control.
+            Properties = new PropertyControl(vcap_source);
+        }
+
+        /// <summary>Properties that user can get/set value.</summary>
+        public PropertyControl Properties { get; private set; }
+        public class PropertyControl
+        {
+            /// <summary>Camera Control properties this camera supports.</summary>
+            public Dictionary<DirectShow.CameraControlProperty, Property> CameraControl { get; private set; }
+
+            /// <summary>Video Processing Amplifier properties this camera supports.</summary>
+            public Dictionary<DirectShow.VideoProcAmpProperty, Property> VideoProcAmp { get; private set; }
+
+            public PropertyControl(DirectShow.IBaseFilter vcap_source)
+            {
+                var cam_ctrl = vcap_source as DirectShow.IAMCameraControl;
+                var vid_ctrl = vcap_source as DirectShow.IAMVideoProcAmp;
+                if (cam_ctrl == null) throw new InvalidOperationException("IAMCameraControlインタフェースを取得できません。");
+                if (vid_ctrl == null) throw new InvalidOperationException("IAMVideoProcAmpインタフェースを取得できません。");
+
+                // Pan, Tilt, Roll, Zoom, Exposure, Iris, Focus
+                this.CameraControl = Enum.GetValues(typeof(DirectShow.CameraControlProperty)).Cast<DirectShow.CameraControlProperty>()
+                    .Select(item =>
+                    {
+                        int min = 0, max = 0, step = 0, def = 0, flags = 0;
+                        try { cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); }
+                        catch (Exception) { return null; } // ignore not support.
+                        return new { Key = item, Value = new PropertyControl.Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag)) };
+                    }).Where(x => x != null)
+                    .ToDictionary(x => x.Key, x => x.Value);
+
+                // Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain
+                this.VideoProcAmp = Enum.GetValues(typeof(DirectShow.VideoProcAmpProperty)).Cast<DirectShow.VideoProcAmpProperty>()
+                    .Select(item =>
+                    {
+                        int min = 0, max = 0, step = 0, def = 0, flags = 0;
+                        try { vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); }
+                        catch (Exception) { return null; } // ignore not support.
+                        return new { Key = item, Value = new PropertyControl.Property(min, max, step, def, flags, (flag, value) => vid_ctrl.Set(item, value, (int)flag)) };
+                    }).Where(x => x != null)
+                    .ToDictionary(x => x.Key, x => x.Value);
+            }
+
+            public class Property
+            {
+                public int Min { get; private set; }
+                public int Max { get; private set; }
+                public int Step { get; private set; }
+                public int Default { get; private set; }
+                public DirectShow.CameraControlFlags Flags { get; private set; }
+                public Action<DirectShow.CameraControlFlags, int> Set { get; private set; }
+
+                public Property(int min, int max, int step, int @default, int flags, Action<DirectShow.CameraControlFlags, int> set)
+                {
+                    this.Min = min;
+                    this.Max = max;
+                    this.Step = step;
+                    this.Default = @default;
+                    this.Flags = (DirectShow.CameraControlFlags)flags;
+                    this.Set = set;
+                }
+
+                public override string ToString()
+                {
+                    return string.Format("min={0}, max={1}, step={2}, default={3}, flags={4}", Min, Max, Step, Default, Flags);
+                }
+            }
         }
 
         /// <summary>Get Bitmap from Sample Grabber</summary>
