@@ -25,7 +25,21 @@ namespace GitHub.secile.Video
     // Immediately after starting the USB camera,
     // GetBitmap() fails because image buffer is not prepared yet.
     // var bmp = camera.GetBitmap();
-    
+    //
+    // adjust properties.
+    // UsbCamera.PropertyItems.Property prop;
+    // prop = camera.Properties[DirectShow.CameraControlProperty.Exposure];
+    // if (prop.Available)
+    // {
+    //     prop.SetValue(DirectShow.CameraControlFlags.Manual, prop.Default);
+    // }
+    // 
+    // prop = camera.Properties[DirectShow.VideoProcAmpProperty.WhiteBalance];
+    // if (prop.Available && prop.CanAuto)
+    // {
+    //     prop.SetValue(DirectShow.CameraControlFlags.Auto, 0);
+    // }
+
     class UsbCamera
     {
         /// <summary>Usb camera image size.</summary>
@@ -159,49 +173,66 @@ namespace GitHub.secile.Video
                 DirectShow.ReleaseInstance(ref graph);
             };
 
-            // Property Control.
-            Properties = new PropertyControl(vcap_source);
+            // Properties.
+            Properties = new PropertyItems(vcap_source);
         }
 
-        /// <summary>Properties that user can get/set value.</summary>
-        public PropertyControl Properties { get; private set; }
-        public class PropertyControl
+        /// <summary>Properties user can adjust.</summary>
+        public PropertyItems Properties { get; private set; }
+        public class PropertyItems
         {
-            /// <summary>Camera Control properties this camera supports.</summary>
-            public Dictionary<DirectShow.CameraControlProperty, Property> CameraControl { get; private set; }
-
-            /// <summary>Video Processing Amplifier properties this camera supports.</summary>
-            public Dictionary<DirectShow.VideoProcAmpProperty, Property> VideoProcAmp { get; private set; }
-
-            public PropertyControl(DirectShow.IBaseFilter vcap_source)
+            public PropertyItems(DirectShow.IBaseFilter vcap_source)
             {
-                var cam_ctrl = vcap_source as DirectShow.IAMCameraControl;
-                var vid_ctrl = vcap_source as DirectShow.IAMVideoProcAmp;
-                if (cam_ctrl == null) throw new InvalidOperationException("IAMCameraControlインタフェースを取得できません。");
-                if (vid_ctrl == null) throw new InvalidOperationException("IAMVideoProcAmpインタフェースを取得できません。");
+                {
+                    // Pan, Tilt, Roll, Zoom, Exposure, Iris, Focus
+                    var cam_ctrl = vcap_source as DirectShow.IAMCameraControl;
+                    if (cam_ctrl == null) throw new InvalidOperationException("no IAMCameraControl Interface.");
+                    this.CameraControl = Enum.GetValues(typeof(DirectShow.CameraControlProperty)).Cast<DirectShow.CameraControlProperty>()
+                        .Select(item =>
+                        {
+                            PropertyItems.Property prop = null;
+                            try
+                            {
+                                int min = 0, max = 0, step = 0, def = 0, flags = 0;
+                                cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
+                                prop = new Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag));
+                            }
+                            catch (Exception) { prop = new Property(); } // available = false
+                            return new { Key = item, Value = prop };
+                        }).ToDictionary(x => x.Key, x => x.Value);
+                }
 
-                // Pan, Tilt, Roll, Zoom, Exposure, Iris, Focus
-                this.CameraControl = Enum.GetValues(typeof(DirectShow.CameraControlProperty)).Cast<DirectShow.CameraControlProperty>()
-                    .Select(item =>
-                    {
-                        int min = 0, max = 0, step = 0, def = 0, flags = 0;
-                        try { cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); }
-                        catch (Exception) { return null; } // ignore not support.
-                        return new { Key = item, Value = new PropertyControl.Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag)) };
-                    }).Where(x => x != null)
-                    .ToDictionary(x => x.Key, x => x.Value);
-
-                // Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain
-                this.VideoProcAmp = Enum.GetValues(typeof(DirectShow.VideoProcAmpProperty)).Cast<DirectShow.VideoProcAmpProperty>()
-                    .Select(item =>
-                    {
-                        int min = 0, max = 0, step = 0, def = 0, flags = 0;
-                        try { vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); }
-                        catch (Exception) { return null; } // ignore not support.
-                        return new { Key = item, Value = new PropertyControl.Property(min, max, step, def, flags, (flag, value) => vid_ctrl.Set(item, value, (int)flag)) };
-                    }).Where(x => x != null)
-                    .ToDictionary(x => x.Key, x => x.Value);
+                {
+                    // Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain
+                    var vid_ctrl = vcap_source as DirectShow.IAMVideoProcAmp;
+                    if (vid_ctrl == null) throw new InvalidOperationException("no IAMVideoProcAmp Interface.");
+                    this.VideoProcAmp = Enum.GetValues(typeof(DirectShow.VideoProcAmpProperty)).Cast<DirectShow.VideoProcAmpProperty>()
+                        .Select(item =>
+                        {
+                            PropertyItems.Property prop = null;
+                            try
+                            {
+                                int min = 0, max = 0, step = 0, def = 0, flags = 0;
+                                vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
+                                prop = new Property(min, max, step, def, flags, (flag, value) => vid_ctrl.Set(item, value, (int)flag));
+                            }
+                            catch (Exception) { prop = new Property(); } // available = false
+                            return new { Key = item, Value = prop };
+                        }).ToDictionary(x => x.Key, x => x.Value);
+                }
             }
+
+            /// <summary>Camera Control properties.</summary>
+            private Dictionary<DirectShow.CameraControlProperty, Property> CameraControl;
+
+            /// <summary>Video Processing Amplifier properties.</summary>
+            private Dictionary<DirectShow.VideoProcAmpProperty, Property> VideoProcAmp;
+
+            /// <summary>Get CameraControl Property. Check Available before use.</summary>
+            public Property this[DirectShow.CameraControlProperty item] { get { return CameraControl[item]; } }
+
+            /// <summary>Get VideoProcAmp Property. Check Available before use.</summary>
+            public Property this[DirectShow.VideoProcAmpProperty item] { get { return VideoProcAmp[item]; } }
 
             public class Property
             {
@@ -210,7 +241,15 @@ namespace GitHub.secile.Video
                 public int Step { get; private set; }
                 public int Default { get; private set; }
                 public DirectShow.CameraControlFlags Flags { get; private set; }
-                public Action<DirectShow.CameraControlFlags, int> Set { get; private set; }
+                public Action<DirectShow.CameraControlFlags, int> SetValue { get; private set; }
+                public bool Available { get; private set; }
+                public bool CanAuto { get; private set; }
+
+                public Property()
+                {
+                    this.SetValue = (flag, value) => { };
+                    this.Available = false;
+                }
 
                 public Property(int min, int max, int step, int @default, int flags, Action<DirectShow.CameraControlFlags, int> set)
                 {
@@ -219,12 +258,14 @@ namespace GitHub.secile.Video
                     this.Step = step;
                     this.Default = @default;
                     this.Flags = (DirectShow.CameraControlFlags)flags;
-                    this.Set = set;
+                    this.CanAuto = (Flags & DirectShow.CameraControlFlags.Auto) == DirectShow.CameraControlFlags.Auto;
+                    this.SetValue = set;
+                    this.Available = true;
                 }
 
                 public override string ToString()
                 {
-                    return string.Format("min={0}, max={1}, step={2}, default={3}, flags={4}", Min, Max, Step, Default, Flags);
+                    return string.Format("Available={0}, Min={1}, Max={2}, Step={3}, Default={4}, Flags={5}", Available, Min, Max, Step, Default, Flags);
                 }
             }
         }
