@@ -34,32 +34,24 @@ this.FormClosing += (s, ev) => timer.Stop();
 this.FormClosing += (s, ev) => camera.Stop();
 ```
 
-# Manipulates camera control and video processing amplifier.
+# Adjust camera control and video processing amplifier.
 ```C#
-// show properties this camera supports.
-// [Pan, Tilt, Roll, Zoom, Exposure, Iris, Focus]
-foreach (var item in camera.Properties.CameraControl) Console.WriteLine("{0}:{1}", item.Key, item.Value);
-// [Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain]
-foreach (var item in camera.Properties.VideoProcAmp) Console.WriteLine("{0}:{1}", item.Key, item.Value);
-
-// get property min, max, default, step value, and set new value.
-if (camera.Properties.VideoProcAmp.ContainsKey(DirectShow.VideoProcAmpProperty.Brightness))
+// adjust properties.
+UsbCamera.PropertyItems.Property prop;
+prop = camera.Properties[DirectShow.CameraControlProperty.Exposure];
+if (prop.Available)
 {
-    var min = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Min;
-    var max = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Max;
-    var def = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Default;
-    var step = camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Step;
-    camera.Properties.VideoProcAmp[DirectShow.VideoProcAmpProperty.Brightness].Set(DirectShow.CameraControlFlags.Manual, max);
+    var min = prop.Min;
+    var max = prop.Max;
+    var def = prop.Default;
+    var step = prop.Step;
+    prop.SetValue(DirectShow.CameraControlFlags.Manual, prop.Default);
 }
 
-// set property value to auto.
-if (camera.Properties.CameraControl.ContainsKey(DirectShow.CameraControlProperty.Exposure))
+prop = camera.Properties[DirectShow.VideoProcAmpProperty.WhiteBalance];
+if (prop.Available && prop.CanAuto)
 {
-    var flags = camera.Properties.CameraControl[DirectShow.CameraControlProperty.Exposure].Flags;
-    if ((flags & DirectShow.CameraControlFlags.Auto) == DirectShow.CameraControlFlags.Auto)
-    {
-        camera.Properties.CameraControl[DirectShow.CameraControlProperty.Exposure].Set(DirectShow.CameraControlFlags.Auto, 0);
-    }
+    prop.SetValue(DirectShow.CameraControlFlags.Auto, 0);
 }
 ```
 
