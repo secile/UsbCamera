@@ -34,7 +34,7 @@ this.FormClosing += (s, ev) => timer.Stop();
 this.FormClosing += (s, ev) => camera.Stop();
 ```
 
-# Adjust camera control and video processing amplifier.
+# Adjust Tilt, Zoom, Exposure, Brightness, Contrast, etc...
 ```C#
 // adjust properties.
 UsbCamera.PropertyItems.Property prop;
