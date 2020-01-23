@@ -183,43 +183,39 @@ namespace GitHub.secile.Video
         {
             public PropertyItems(DirectShow.IBaseFilter vcap_source)
             {
-                {
-                    // Pan, Tilt, Roll, Zoom, Exposure, Iris, Focus
-                    var cam_ctrl = vcap_source as DirectShow.IAMCameraControl;
-                    if (cam_ctrl == null) throw new InvalidOperationException("no IAMCameraControl Interface.");
-                    this.CameraControl = Enum.GetValues(typeof(DirectShow.CameraControlProperty)).Cast<DirectShow.CameraControlProperty>()
-                        .Select(item =>
+                // Pan, Tilt, Roll, Zoom, Exposure, Iris, Focus
+                this.CameraControl = Enum.GetValues(typeof(DirectShow.CameraControlProperty)).Cast<DirectShow.CameraControlProperty>()
+                    .Select(item =>
+                    {
+                        PropertyItems.Property prop = null;
+                        try
                         {
-                            PropertyItems.Property prop = null;
-                            try
-                            {
-                                int min = 0, max = 0, step = 0, def = 0, flags = 0;
-                                cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
-                                prop = new Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag));
-                            }
-                            catch (Exception) { prop = new Property(); } // available = false
+                            var cam_ctrl = vcap_source as DirectShow.IAMCameraControl;
+                            if (cam_ctrl == null) throw new NotSupportedException("no IAMCameraControl Interface.");
+                            int min = 0, max = 0, step = 0, def = 0, flags = 0;
+                            cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
+                            prop = new Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag));
+                        }
+                        catch (Exception) { prop = new Property(); } // available = false
                             return new { Key = item, Value = prop };
-                        }).ToDictionary(x => x.Key, x => x.Value);
-                }
+                    }).ToDictionary(x => x.Key, x => x.Value);
 
-                {
-                    // Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain
-                    var vid_ctrl = vcap_source as DirectShow.IAMVideoProcAmp;
-                    if (vid_ctrl == null) throw new InvalidOperationException("no IAMVideoProcAmp Interface.");
-                    this.VideoProcAmp = Enum.GetValues(typeof(DirectShow.VideoProcAmpProperty)).Cast<DirectShow.VideoProcAmpProperty>()
-                        .Select(item =>
+                // Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain
+                this.VideoProcAmp = Enum.GetValues(typeof(DirectShow.VideoProcAmpProperty)).Cast<DirectShow.VideoProcAmpProperty>()
+                    .Select(item =>
+                    {
+                        PropertyItems.Property prop = null;
+                        try
                         {
-                            PropertyItems.Property prop = null;
-                            try
-                            {
-                                int min = 0, max = 0, step = 0, def = 0, flags = 0;
-                                vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
-                                prop = new Property(min, max, step, def, flags, (flag, value) => vid_ctrl.Set(item, value, (int)flag));
-                            }
-                            catch (Exception) { prop = new Property(); } // available = false
+                            var vid_ctrl = vcap_source as DirectShow.IAMVideoProcAmp;
+                            if (vid_ctrl == null) throw new NotSupportedException("no IAMVideoProcAmp Interface.");
+                            int min = 0, max = 0, step = 0, def = 0, flags = 0;
+                            vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
+                            prop = new Property(min, max, step, def, flags, (flag, value) => vid_ctrl.Set(item, value, (int)flag));
+                        }
+                        catch (Exception) { prop = new Property(); } // available = false
                             return new { Key = item, Value = prop };
-                        }).ToDictionary(x => x.Key, x => x.Value);
-                }
+                    }).ToDictionary(x => x.Key, x => x.Value);
             }
 
             /// <summary>Camera Control properties.</summary>
@@ -317,7 +313,7 @@ namespace GitHub.secile.Video
             for (int y = 0; y < height; y++)
             {
                 var src_idx = sz - (stride * (y + 1)); // 最終行から
-                var dst = new IntPtr(bmp_data.Scan0.ToInt32() + (stride * y));
+                var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
                 Marshal.Copy(data, src_idx, dst, stride);
             }
             result.UnlockBits(bmp_data);
@@ -584,7 +580,7 @@ namespace GitHub.secile.Video
             DirectShow.AM_MEDIA_TYPE mt = null;
             config.GetStreamCaps(index, ref mt, cap_data);
             var cap = PtrToStructure<DirectShow.VIDEO_STREAM_CONFIG_CAPS>(cap_data);
-            
+
             if (mt.FormatType == DirectShow.DsGuid.FORMAT_VideoInfo)
             {
                 var vinfo = PtrToStructure<DirectShow.VIDEOINFOHEADER>(mt.pbFormat);
@@ -629,6 +625,7 @@ namespace GitHub.secile.Video
             private string CapsString()
             {
                 var sb = new StringBuilder();
+                sb.AppendFormat("{0}, ", DirectShow.DsGuid.GetNickname(Caps.Guid));
                 foreach (var info in Caps.GetType().GetFields())
                 {
                     sb.AppendFormat("{0}={1}, ", info.Name, info.GetValue(Caps));
@@ -1373,7 +1370,7 @@ namespace GitHub.secile.Video
             public static readonly Guid PIN_CATEGORY_PREVIEW = new Guid("{fb6c4282-0353-11d1-905f-0000c0cc16ba}");
             public static readonly Guid PIN_CATEGORY_STILL = new Guid("{fb6c428a-0353-11d1-905f-0000c0cc16ba}");
 
-            private static Dictionary<string, Guid> NicknameCache = null;
+            private static Dictionary<Guid, string> NicknameCache = null;
 
             /// <summary>
             /// Guidをわかりやすい文字列で返す。
@@ -1386,14 +1383,13 @@ namespace GitHub.secile.Video
                 {
                     NicknameCache = typeof(DsGuid).GetFields(System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)
                         .Where(x => x.FieldType == typeof(Guid))
-                        .ToDictionary(x => x.Name, x => (Guid)x.GetValue(null));
+                        .ToDictionary(x => (Guid)x.GetValue(null), x => x.Name);
                 }
 
-                var items = NicknameCache.Where(x => x.Value == guid);
-                if (items.Any())
+                if (NicknameCache.ContainsKey(guid))
                 {
-                    var item = items.FirstOrDefault();
-                    var elem = item.Key.Split('_');
+                    var name = NicknameCache[guid];
+                    var elem = name.Split('_');
 
                     // '_'で分割して、2個目以降を連結する。
                     // MEDIATYPE_Videoなら[Video]を返す。
@@ -1405,7 +1401,7 @@ namespace GitHub.secile.Video
                     }
                     else
                     {
-                        return item.Key;
+                        return name;
                     }
                 }
 
