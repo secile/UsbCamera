@@ -11,12 +11,12 @@ string[] devices = UsbCamera.FindDevices();
 if (devices.Length == 0) return; // no camera.
             
 // check format.
-UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(0);
-foreach (var item in formats) Console.WriteLine("{0}-{1}", Array.IndexOf(formats, item), item);
+int cameraIndex = 0;
+UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(cameraIndex);
+for(int i=0; i<formats.Length; i++) Console.WriteLine("{0}:{1}", i, formats[i]);
             
 // create usb camera and start.
-var index = 0;
-var camera = new UsbCamera(index, formats[0]);
+var camera = new UsbCamera(cameraIndex, formats[0]);
 camera.Start();
             
 // get image.
