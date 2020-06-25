@@ -13,12 +13,12 @@ namespace GitHub.secile.Video
     // if (devices.Length == 0) return; // no camera.
     //
     // check format.
-    // UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(0);
-    // foreach (var item in formats) Console.WriteLine(item);
+    // int cameraIndex = 0;
+    // UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(cameraIndex);
+    // for(int i=0; i<formats.Length; i++) Console.WriteLine("{0}:{1}", i, formats[i]);
     //
     // create usb camera and start.
-    // var index = 0;
-    // var camera = new UsbCamera(index, formats[0]);
+    // var camera = new UsbCamera(cameraIndex, formats[0]);
     // camera.Start();
     //
     // get image.
@@ -158,7 +158,11 @@ namespace GitHub.secile.Video
                 DirectShow.DeleteMediaType(ref mt);
 
                 Size = new Size(width, height);
-                GetBitmap = () => GetBitmapMain(i_grabber, width, height, stride);
+
+                // fix screen tearing problem(issure #2)
+                // you can use previous method if you swap the comment line below.
+                // GetBitmap = () => GetBitmapFromSampleGrabberBuffer(i_grabber, width, height, stride);
+                GetBitmap = GetBitmapFromSampleGrabberCallback(i_grabber, width, height, stride);
             }
 
             // Assign Delegates.
@@ -191,13 +195,13 @@ namespace GitHub.secile.Video
                         try
                         {
                             var cam_ctrl = vcap_source as DirectShow.IAMCameraControl;
-                            if (cam_ctrl == null) throw new NotSupportedException("no IAMCameraControl Interface.");
+                            if (cam_ctrl == null) throw new NotSupportedException("no IAMCameraControl Interface."); // will catched.
                             int min = 0, max = 0, step = 0, def = 0, flags = 0;
-                            cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
+                            cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); // COMException if not supports.
                             prop = new Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag));
                         }
                         catch (Exception) { prop = new Property(); } // available = false
-                            return new { Key = item, Value = prop };
+                        return new { Key = item, Value = prop };
                     }).ToDictionary(x => x.Key, x => x.Value);
 
                 // Brightness, Contrast, Hue, Saturation, Sharpness, Gamma, ColorEnable, WhiteBalance, BacklightCompensation, Gain
@@ -208,13 +212,13 @@ namespace GitHub.secile.Video
                         try
                         {
                             var vid_ctrl = vcap_source as DirectShow.IAMVideoProcAmp;
-                            if (vid_ctrl == null) throw new NotSupportedException("no IAMVideoProcAmp Interface.");
+                            if (vid_ctrl == null) throw new NotSupportedException("no IAMVideoProcAmp Interface."); // will catched.
                             int min = 0, max = 0, step = 0, def = 0, flags = 0;
-                            vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags);
+                            vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); // COMException if not supports.
                             prop = new Property(min, max, step, def, flags, (flag, value) => vid_ctrl.Set(item, value, (int)flag));
                         }
                         catch (Exception) { prop = new Property(); } // available = false
-                            return new { Key = item, Value = prop };
+                        return new { Key = item, Value = prop };
                     }).ToDictionary(x => x.Key, x => x.Value);
             }
 
@@ -266,12 +270,68 @@ namespace GitHub.secile.Video
             }
         }
 
-        /// <summary>Get Bitmap from Sample Grabber</summary>
-        private Bitmap GetBitmapMain(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+        private class SampleGrabberCallback : DirectShow.ISampleGrabberCB
+        {
+            private byte[] Buffer;
+            private object BufferLock = new object();
+
+            public Bitmap GetBitmap(int width, int height, int stride)
+            {
+                var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                if (Buffer == null) return result;
+
+                var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                lock (BufferLock)
+                {
+                    // copy from last row.
+                    for (int y = 0; y < height; y++)
+                    {
+                        var src_idx = Buffer.Length - (stride * (y + 1));
+                        var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
+                        Marshal.Copy(Buffer, src_idx, dst, stride);
+                    }
+                }
+                result.UnlockBits(bmp_data);
+
+                return result;
+            }
+
+            // called when each sample completed.
+            // The data processing thread blocks until the callback method returns. If the callback does not return quickly, it can interfere with playback.
+            public int BufferCB(double SampleTime, IntPtr pBuffer, int BufferLen)
+            {
+                if (Buffer == null || Buffer.Length != BufferLen)
+                {
+                    Buffer = new byte[BufferLen];
+                }
+
+                lock (BufferLock)
+                {
+                    Marshal.Copy(pBuffer, Buffer, 0, BufferLen);
+                }
+                return 0;
+            }
+
+            // never called.
+            public int SampleCB(double SampleTime, DirectShow.IMediaSample pSample)
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        private Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+        {
+            var sampler = new SampleGrabberCallback();
+            i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
+            return () => sampler.GetBitmap(width, height, stride);
+        }
+
+        /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
+        private Bitmap GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             try
             {
-                return GetBitmapMainMain(i_grabber, width, height, stride);
+                return GetBitmapFromSampleGrabberBufferMain(i_grabber, width, height, stride);
             }
             catch (COMException ex)
             {
@@ -286,8 +346,8 @@ namespace GitHub.secile.Video
             }
         }
 
-        /// <summary>Get Bitmap from Sample Grabber</summary>
-        private Bitmap GetBitmapMainMain(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+        /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
+        private Bitmap GetBitmapFromSampleGrabberBufferMain(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             // サンプルグラバから画像を取得するためには
             // まずサイズ0でGetCurrentBufferを呼び出しバッファサイズを取得し
@@ -492,7 +552,7 @@ namespace GitHub.secile.Video
             var config = pin as DirectShow.IAMStreamConfig;
             if (config == null)
             {
-                throw new InvalidOperationException("IAMStreamConfigインタフェースを取得できません。");
+                throw new InvalidOperationException("no IAMStreamConfig interface.");
             }
 
             // フォーマット個数取得
@@ -500,7 +560,7 @@ namespace GitHub.secile.Video
             config.GetNumberOfCapabilities(ref cap_count, ref cap_size);
             if (cap_size != Marshal.SizeOf(typeof(DirectShow.VIDEO_STREAM_CONFIG_CAPS)))
             {
-                throw new InvalidOperationException("IAMStreamConfigインタフェースを取得できません。");
+                throw new InvalidOperationException("no VIDEO_STREAM_CONFIG_CAPS.");
             }
 
             // 返却値の確保
@@ -562,7 +622,7 @@ namespace GitHub.secile.Video
             var config = pin as DirectShow.IAMStreamConfig;
             if (config == null)
             {
-                throw new InvalidOperationException("ピンはIAMStreamConfigインタフェースを公開しません。");
+                throw new InvalidOperationException("no IAMStreamConfig interface.");
             }
 
             // フォーマット個数取得
@@ -570,7 +630,7 @@ namespace GitHub.secile.Video
             config.GetNumberOfCapabilities(ref cap_count, ref cap_size);
             if (cap_size != Marshal.SizeOf(typeof(DirectShow.VIDEO_STREAM_CONFIG_CAPS)))
             {
-                throw new InvalidOperationException("VIDEO_STREAM_CONFIG_CAPSを取得できません。");
+                throw new InvalidOperationException("no VIDEO_STREAM_CONFIG_CAPS.");
             }
 
             // データ用領域確保
