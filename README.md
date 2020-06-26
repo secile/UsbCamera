@@ -55,7 +55,7 @@ if (prop.Available && prop.CanAuto)
 }
 ```
 
-# No need external library.
+# No external library required.
 Previos version, this project used external library.
 But now, no need to add external library to your project.
 
