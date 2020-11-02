@@ -8,6 +8,7 @@ using System.Runtime.InteropServices.ComTypes;
 
 namespace GitHub.secile.Video
 {
+    // Fork from [https://github.com/secile/UsbCamera]
     // [How to use]
     // string[] devices = UsbCamera.FindDevices();
     // if (devices.Length == 0) return; // no camera.
@@ -325,7 +326,7 @@ namespace GitHub.secile.Video
 
         private class SampleGrabberCallback : DirectShow.ISampleGrabberCB
         {
-            private byte[] Buffer;
+            private byte[] _buffer;
             private readonly object _bufferLocker = new object();
             private readonly object _getBitmapLocker = new object();
             private readonly object _getBufferLocker = new object();
@@ -333,7 +334,7 @@ namespace GitHub.secile.Video
             /// <summary>
             /// 有新的数据
             /// </summary>
-            public bool NewBuffer = false;
+            public bool _newBuffer = false;
             private byte[] _buffer4GetBitmapFun = null;
             private byte[] _buffer4GetBufferFun = null;
             private byte[] _buffer4GetBufferFunResult = null;
@@ -355,7 +356,7 @@ namespace GitHub.secile.Video
             public Bitmap GetBitmap(bool needOldData, int width, int height, int stride)
             {
                 Bitmap result = null;
-                if (!NewBuffer
+                if (!_newBuffer
                     && !needOldData
                     && !IsRestarting)
                 {
@@ -366,15 +367,15 @@ namespace GitHub.secile.Video
                 {
                     lock (_getBitmapLocker)
                     {
-                        if (Buffer != null)
+                        if (_buffer != null)
                         {
                             if (_buffer4GetBitmapFun == null
-                                || _buffer4GetBitmapFun.Length != Buffer.Length)
+                                || _buffer4GetBitmapFun.Length != _buffer.Length)
                             {
-                                _buffer4GetBitmapFun = new byte[Buffer.Length];
+                                _buffer4GetBitmapFun = new byte[_buffer.Length];
                             }
-                            Array.Copy(Buffer, _buffer4GetBitmapFun, Buffer.Length);
-                            NewBuffer = false;
+                            Array.Copy(_buffer, _buffer4GetBitmapFun, _buffer.Length);
+                            _newBuffer = false;
                         }
                     }
                 }
@@ -403,7 +404,7 @@ namespace GitHub.secile.Video
 
             public byte[] GetBuffer(bool needOldData, int width, int height, int stride)
             {
-                if (!NewBuffer
+                if (!_newBuffer
                     && !needOldData
                     && !IsRestarting)
                 {
@@ -413,15 +414,15 @@ namespace GitHub.secile.Video
                 {
                     lock (_getBufferLocker)
                     {
-                        if (Buffer != null)
+                        if (_buffer != null)
                         {
                             if (_buffer4GetBufferFun == null
-                                || _buffer4GetBufferFun.Length != Buffer.Length)
+                                || _buffer4GetBufferFun.Length != _buffer.Length)
                             {
-                                _buffer4GetBufferFun = new byte[Buffer.Length];
+                                _buffer4GetBufferFun = new byte[_buffer.Length];
                             }
-                            Array.Copy(Buffer, _buffer4GetBufferFun, Buffer.Length);
-                            NewBuffer = false;
+                            Array.Copy(_buffer, _buffer4GetBufferFun, _buffer.Length);
+                            _newBuffer = false;
                         }
                     }
                 }
@@ -452,13 +453,13 @@ namespace GitHub.secile.Video
             {
                 lock (_bufferLocker)
                 {
-                    if (Buffer == null
-                        || Buffer.Length != BufferLen)
+                    if (_buffer == null
+                        || _buffer.Length != BufferLen)
                     {
-                        Buffer = new byte[BufferLen];
+                        _buffer = new byte[BufferLen];
                     }
-                    Marshal.Copy(pBuffer, Buffer, 0, BufferLen);
-                    NewBuffer = true;
+                    Marshal.Copy(pBuffer, _buffer, 0, BufferLen);
+                    _newBuffer = true;
                     // 重连完成
                     IsRestarting = false;
                 }
