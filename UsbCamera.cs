@@ -21,10 +21,35 @@ namespace GitHub.secile.Video
     // var camera = new UsbCamera(cameraIndex, formats[0]);
     // camera.Start();
     //
+    // wait to link the usb camera
+    // while (!camera.HadLinked())
+    // {
+    //     Thread.Sleep(formats[0].TimePerFrame / 10000L);
+    // }
+    // 
     // get image.
     // Immediately after starting the USB camera,
-    // GetBitmap() fails because image buffer is not prepared yet.
-    // var bmp = camera.GetBitmap();
+    // GetBitmap([needOldData:]true) fails because image buffer is not prepared yet.
+    // GetBitmap([needOldData:]false) fails because image buffer had return.
+    // var bmp = camera.GetBitmap([needOldData:]false);
+    // 
+    // get buffer
+    // byte[] buffer = camera.GetBitmapBuffer([needOldData:]false);
+    //
+    // create  WPF WritableBitmap
+    // WriteableBitmap writeableBitmap = new WriteableBitmap(camera.Size.Width, camera.Size.Height, 96, 96, PixelFormats.Bgr24, null);
+    //
+    // updata WPF WritableBitmap
+    //
+    // if (buffer != null
+    //     && buffer.Length > 0
+    //     && writableBitmap != null)
+    // {
+    //     writableBitmap.Lock();
+    //     Marshal.Copy(buffer, 0, writableBitmap.BackBuffer, buffer.Length);
+    //     writableBitmap.AddDirtyRect(new System.Windows.Int32Rect(0, 0, writableBitmap.PixelWidth, writableBitmap.PixelHeight));
+    //     writableBitmap.Unlock();
+    // }
     //
     // adjust properties.
     // UsbCamera.PropertyItems.Property prop;
@@ -33,14 +58,14 @@ namespace GitHub.secile.Video
     // {
     //     prop.SetValue(DirectShow.CameraControlFlags.Manual, prop.Default);
     // }
-    // 
+    //
     // prop = camera.Properties[DirectShow.VideoProcAmpProperty.WhiteBalance];
     // if (prop.Available && prop.CanAuto)
     // {
     //     prop.SetValue(DirectShow.CameraControlFlags.Auto, 0);
     // }
 
-    class UsbCamera
+    internal class UsbCamera
     {
         /// <summary>Usb camera image size.</summary>
         public Size Size { get; private set; }
@@ -56,7 +81,18 @@ namespace GitHub.secile.Video
 
         /// <summary>Get image.</summary>
         /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
-        public Func<Bitmap> GetBitmap { get; private set; }
+        public Func<bool, Bitmap> GetBitmap { get; private set; }
+
+        public Func<bool, byte[]> GetBitmapBuffer { get; private set; }
+        /// <summary>
+        /// 是否已连接成功(获取成功一次图像)
+        /// </summary>
+        public Func<bool> HadLinked { get; private set; }
+
+        public static IList<DeviceInfo> FindDeviceInfos()
+        {
+            return DirectShow.GetFiltes(DirectShow.DsGuid.CLSID_VideoInputDeviceCategory, true, false);
+        }
 
         /// <summary>
         /// Get available USB camera list.
@@ -148,6 +184,7 @@ namespace GitHub.secile.Video
             builder.RenderStream(ref pinCategory, ref mediaType, vcap_source, grabber, renderer);
 
             // SampleGrabber Format.
+            var sampler = new SampleGrabberCallback();
             {
                 var mt = new DirectShow.AM_MEDIA_TYPE();
                 i_grabber.GetConnectedMediaType(mt);
@@ -162,11 +199,26 @@ namespace GitHub.secile.Video
                 // fix screen tearing problem(issure #2)
                 // you can use previous method if you swap the comment line below.
                 // GetBitmap = () => GetBitmapFromSampleGrabberBuffer(i_grabber, width, height, stride);
-                GetBitmap = GetBitmapFromSampleGrabberCallback(i_grabber, width, height, stride);
+
+                i_grabber.SetCallback(sampler, 1);
+
+                GetBitmap = (bool needOldData) =>
+                {
+                    return GetBitmapFromSampleGrabberCallback(needOldData, sampler, width, height, stride);
+                };
+                GetBitmapBuffer = (bool needOldData) =>
+                {
+                    return GetBitmapBufferFromSampleGrabberCallback(needOldData, sampler, width, height, stride);
+                };
+                HadLinked = HadLinkedFromSampleGrabberCallback(sampler);
             }
 
             // Assign Delegates.
-            Start = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Running);
+            Start = () =>
+            {
+                sampler.IsRestarting = true;
+                DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Running);
+            };
             Stop = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Stopped);
             Release = () =>
             {
@@ -195,7 +247,8 @@ namespace GitHub.secile.Video
                         try
                         {
                             var cam_ctrl = vcap_source as DirectShow.IAMCameraControl;
-                            if (cam_ctrl == null) throw new NotSupportedException("no IAMCameraControl Interface."); // will catched.
+                            if (cam_ctrl == null)
+                                throw new NotSupportedException("no IAMCameraControl Interface."); // will catched.
                             int min = 0, max = 0, step = 0, def = 0, flags = 0;
                             cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); // COMException if not supports.
                             prop = new Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag));
@@ -223,10 +276,10 @@ namespace GitHub.secile.Video
             }
 
             /// <summary>Camera Control properties.</summary>
-            private Dictionary<DirectShow.CameraControlProperty, Property> CameraControl;
+            private readonly Dictionary<DirectShow.CameraControlProperty, Property> CameraControl;
 
             /// <summary>Video Processing Amplifier properties.</summary>
-            private Dictionary<DirectShow.VideoProcAmpProperty, Property> VideoProcAmp;
+            private readonly Dictionary<DirectShow.VideoProcAmpProperty, Property> VideoProcAmp;
 
             /// <summary>Get CameraControl Property. Check Available before use.</summary>
             public Property this[DirectShow.CameraControlProperty item] { get { return CameraControl[item]; } }
@@ -273,41 +326,145 @@ namespace GitHub.secile.Video
         private class SampleGrabberCallback : DirectShow.ISampleGrabberCB
         {
             private byte[] Buffer;
-            private object BufferLock = new object();
+            private readonly object _bufferLocker = new object();
+            private readonly object _getBitmapLocker = new object();
+            private readonly object _getBufferLocker = new object();
+            private bool _hadLinked = false;
+            /// <summary>
+            /// 有新的数据
+            /// </summary>
+            public bool NewBuffer = false;
+            private byte[] _buffer4GetBitmapFun = null;
+            private byte[] _buffer4GetBufferFun = null;
+            private byte[] _buffer4GetBufferFunResult = null;
 
-            public Bitmap GetBitmap(int width, int height, int stride)
+            /// <summary>
+            /// 是否在重连中
+            /// <para>重连中 返回旧数据</para>
+            /// </summary>
+            public bool IsRestarting = false;
+            /// <summary>
+            /// 是否已连接成功(获取成功一次图像)
+            /// </summary>
+            /// <returns></returns>
+            public bool HadLinked()
             {
-                var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-                if (Buffer == null) return result;
+                return _hadLinked;
+            }
 
-                var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-                lock (BufferLock)
+            public Bitmap GetBitmap(bool needOldData, int width, int height, int stride)
+            {
+                Bitmap result = null;
+                if (!NewBuffer
+                    && !needOldData
+                    && !IsRestarting)
                 {
-                    // copy from last row.
-                    for (int y = 0; y < height; y++)
+                    return result;
+                }
+
+                lock (_bufferLocker)
+                {
+                    lock (_getBitmapLocker)
                     {
-                        var src_idx = Buffer.Length - (stride * (y + 1));
-                        var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
-                        Marshal.Copy(Buffer, src_idx, dst, stride);
+                        if (Buffer != null)
+                        {
+                            if (_buffer4GetBitmapFun == null
+                                || _buffer4GetBitmapFun.Length != Buffer.Length)
+                            {
+                                _buffer4GetBitmapFun = new byte[Buffer.Length];
+                            }
+                            Array.Copy(Buffer, _buffer4GetBitmapFun, Buffer.Length);
+                            NewBuffer = false;
+                        }
                     }
                 }
-                result.UnlockBits(bmp_data);
+                lock (_getBitmapLocker)
+                {
+                    if (_buffer4GetBitmapFun != null)
+                    {
+                        result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
 
+                        var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size)
+                            , System.Drawing.Imaging.ImageLockMode.WriteOnly
+                            , System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+                        // copy from last row.
+                        for (int y = 0; y < height; y++)
+                        {
+                            var src_idx = _buffer4GetBitmapFun.Length - (stride * (y + 1));
+                            var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
+                            Marshal.Copy(_buffer4GetBitmapFun, src_idx, dst, stride);
+                        }
+                        result.UnlockBits(bmp_data);
+                    }
+                }
                 return result;
+            }
+
+            public byte[] GetBuffer(bool needOldData, int width, int height, int stride)
+            {
+                if (!NewBuffer
+                    && !needOldData
+                    && !IsRestarting)
+                {
+                    return null;
+                }
+                lock (_bufferLocker)
+                {
+                    lock (_getBufferLocker)
+                    {
+                        if (Buffer != null)
+                        {
+                            if (_buffer4GetBufferFun == null
+                                || _buffer4GetBufferFun.Length != Buffer.Length)
+                            {
+                                _buffer4GetBufferFun = new byte[Buffer.Length];
+                            }
+                            Array.Copy(Buffer, _buffer4GetBufferFun, Buffer.Length);
+                            NewBuffer = false;
+                        }
+                    }
+                }
+                lock (_getBufferLocker)
+                {
+                    if (_buffer4GetBufferFun != null)
+                    {
+                        if (_buffer4GetBufferFunResult == null
+                            || _buffer4GetBufferFunResult.Length != _buffer4GetBufferFun.Length)
+                        {
+                            _buffer4GetBufferFunResult = new byte[_buffer4GetBufferFun.Length];
+                        }
+
+                        // copy from last row.
+                        for (int y = 0; y < height; y++)
+                        {
+                            var src_idx = _buffer4GetBufferFun.Length - (stride * (y + 1));
+                            Array.Copy(_buffer4GetBufferFun, src_idx, _buffer4GetBufferFunResult, stride * y, stride);
+                        }
+                    }
+                }
+                return _buffer4GetBufferFunResult;
             }
 
             // called when each sample completed.
             // The data processing thread blocks until the callback method returns. If the callback does not return quickly, it can interfere with playback.
             public int BufferCB(double SampleTime, IntPtr pBuffer, int BufferLen)
             {
-                if (Buffer == null || Buffer.Length != BufferLen)
+                lock (_bufferLocker)
                 {
-                    Buffer = new byte[BufferLen];
-                }
-
-                lock (BufferLock)
-                {
+                    if (Buffer == null
+                        || Buffer.Length != BufferLen)
+                    {
+                        Buffer = new byte[BufferLen];
+                    }
                     Marshal.Copy(pBuffer, Buffer, 0, BufferLen);
+                    NewBuffer = true;
+                    // 重连完成
+                    IsRestarting = false;
+                }
+                if (!_hadLinked)
+                {
+                    _hadLinked = true;
                 }
                 return 0;
             }
@@ -319,11 +476,25 @@ namespace GitHub.secile.Video
             }
         }
 
-        private Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+        private Bitmap GetBitmapFromSampleGrabberCallback(bool needOldData, SampleGrabberCallback sampler, int width, int height, int stride)
         {
-            var sampler = new SampleGrabberCallback();
-            i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
-            return () => sampler.GetBitmap(width, height, stride);
+            //var sampler = new SampleGrabberCallback();
+            //i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
+            return sampler.GetBitmap(needOldData, width, height, stride);
+        }
+
+        private byte[] GetBitmapBufferFromSampleGrabberCallback(bool needOldData, SampleGrabberCallback sampler, int width, int height, int stride)
+        {
+            //var sampler = new SampleGrabberCallback();
+            //i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
+            return sampler.GetBuffer(needOldData, width, height, stride);
+        }
+
+        private Func<bool> HadLinkedFromSampleGrabberCallback(SampleGrabberCallback sampler)
+        {
+            //var sampler = new SampleGrabberCallback();
+            //i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
+            return () => sampler.HadLinked();
         }
 
         /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
@@ -542,7 +713,6 @@ namespace GitHub.secile.Video
             SetVideoOutputFormat(pin, 0, Size.Empty, 0);
         }
 
-
         /// <summary>
         /// ビデオキャプチャデバイスがサポートするメディアタイプ・サイズを取得する。
         /// </summary>
@@ -639,7 +809,6 @@ namespace GitHub.secile.Video
             // idx番目のフォーマット情報取得
             DirectShow.AM_MEDIA_TYPE mt = null;
             config.GetStreamCaps(index, ref mt, cap_data);
-            var cap = PtrToStructure<DirectShow.VIDEO_STREAM_CONFIG_CAPS>(cap_data);
 
             if (mt.FormatType == DirectShow.DsGuid.FORMAT_VideoInfo)
             {
@@ -695,7 +864,27 @@ namespace GitHub.secile.Video
         }
     }
 
-    static class DirectShow
+    public class DeviceInfo
+    {
+        /// <summary>
+        /// 设备名称
+        /// </summary>
+        public string Name { get; set; }
+
+        /// <summary>
+        /// 标识设备的唯一字符串
+        /// <para>(仅限视频捕获设备)VT_BSTR</para>
+        /// </summary>
+        public string DevicePath { get; set; }
+
+        /// <summary>
+        /// 音频捕获设备的标识符
+        /// <para>(仅限音频捕获设备)VT_I4</para>
+        /// </summary>
+        public string WaveInID { get; set; }
+    }
+
+    internal static class DirectShow
     {
         #region Function
 
@@ -747,6 +936,42 @@ namespace GitHub.secile.Video
                 var name = (string)value;
 
                 result.Add(name);
+
+                return false; // 継続。
+            });
+
+            return result;
+        }
+
+        /// <summary>
+        /// 获取过滤器列表
+        /// </summary>
+        /// <param name="category"></param>
+        /// <param name="isVideo">是否视频设备</param>
+        /// <param name="isWave">是否音频设备</param>
+        /// <returns></returns>
+        public static List<DeviceInfo> GetFiltes(Guid category, bool isVideo, bool isWave)
+        {
+            var result = new List<DeviceInfo>();
+
+            EnumMonikers(category, (moniker, prop) =>
+            {
+                DeviceInfo info = new DeviceInfo();
+                object value = null;
+                prop.Read("FriendlyName", ref value, 0);
+                info.Name = value + string.Empty;
+                if (isVideo)
+                {
+                    prop.Read("DevicePath", ref value, 0);
+                    info.DevicePath = (string)value;
+                }
+                if (isWave)
+                {
+                    prop.Read("WaveInID", ref value, 0);
+                    info.WaveInID = value + string.Empty;
+                }
+
+                result.Add(info);
 
                 return false; // 継続。
             });
@@ -926,7 +1151,7 @@ namespace GitHub.secile.Video
             mt = null;
         }
 
-        #endregion
+        #endregion 
 
 
         #region Interface
@@ -1173,7 +1398,7 @@ namespace GitHub.secile.Video
             int BufferCB(double SampleTime, IntPtr pBuffer, int BufferLen);
         }
 
-        #endregion
+        #endregion 
 
 
         #region Structure
@@ -1321,7 +1546,7 @@ namespace GitHub.secile.Video
             public int Bottom;
             public override string ToString() { return string.Format("{{{0}, {1}, {2}, {3}}}", Left, Top, Right, Bottom); } // for debugging.
         }
-        #endregion
+        #endregion 
 
 
         #region Enum
@@ -1375,7 +1600,7 @@ namespace GitHub.secile.Video
             Gain = 9
         }
 
-        #endregion
+        #endregion 
 
 
         #region Guid
@@ -1469,6 +1694,6 @@ namespace GitHub.secile.Video
                 return guid.ToString();
             }
         }
-        #endregion
+        #endregion 
     }
 }
