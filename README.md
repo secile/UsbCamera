@@ -1,9 +1,10 @@
 # UsbCamera
-C# source code for using USB camera in WinForms.  
+C# source code for using USB camera in WinForms/WPF.  
 With only single CSharp source code. No external library required.
 
 # How to use
-Add UsbCamera.cs to your project.    
+Add UsbCamera.cs to your project.  
+If WPF, add reference 'System.Drawing' to your project.
 ```C#
 // [How to use]
 // check USB camera is available.
