@@ -4,7 +4,6 @@ With only single CSharp source code. No external library required.
 
 # How to use
 Add UsbCamera.cs to your project.  
-If WPF, add reference 'System.Drawing' to your project.
 ```C#
 // [How to use]
 // check USB camera is available.
@@ -34,6 +33,10 @@ timer.Start();
 this.FormClosing += (s, ev) => timer.Stop();
 this.FormClosing += (s, ev) => camera.Stop();
 ```
+
+# if WPF
+By default, GetBitmap() returns image of System.Drawing.Bitmap.  
+If WPF, define 'USBCAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
 
 # Adjust Tilt, Zoom, Exposure, Brightness, Contrast, etc...
 ```C#
