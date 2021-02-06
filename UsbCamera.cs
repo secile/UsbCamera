@@ -2,9 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+
+#if USBCAMERA_WPF
+using System.Windows;               // Size
+using System.Windows.Media;         // PixelFormats
+using System.Windows.Media.Imaging; // BitmapSource
+#else
+using System.Drawing;
+#endif
 
 namespace GitHub.secile.Video
 {
@@ -40,6 +47,10 @@ namespace GitHub.secile.Video
     //     prop.SetValue(DirectShow.CameraControlFlags.Auto, 0);
     // }
 
+    // [Note]
+    // By default, GetBitmap() returns image of System.Drawing.Bitmap.
+    // If WPF, define 'USECAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
+
     class UsbCamera
     {
         /// <summary>Usb camera image size.</summary>
@@ -56,7 +67,11 @@ namespace GitHub.secile.Video
 
         /// <summary>Get image.</summary>
         /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
+#if USBCAMERA_WPF
+        public Func<BitmapSource> GetBitmap { get; private set; }
+#else
         public Func<Bitmap> GetBitmap { get; private set; }
+#endif
 
         /// <summary>
         /// Get available USB camera list.
@@ -275,25 +290,19 @@ namespace GitHub.secile.Video
             private byte[] Buffer;
             private object BufferLock = new object();
 
-            public Bitmap GetBitmap(int width, int height, int stride)
+#if USBCAMERA_WPF
+            public BitmapSource
+#else
+            public Bitmap
+#endif
+            GetBitmap(int width, int height, int stride)
             {
-                var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-                if (Buffer == null) return result;
+                if (Buffer == null) return EmptyBitmap(width, height);
 
-                var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
                 lock (BufferLock)
                 {
-                    // copy from last row.
-                    for (int y = 0; y < height; y++)
-                    {
-                        var src_idx = Buffer.Length - (stride * (y + 1));
-                        var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
-                        Marshal.Copy(Buffer, src_idx, dst, stride);
-                    }
+                    return BufferToBitmap(Buffer, width, height, stride);
                 }
-                result.UnlockBits(bmp_data);
-
-                return result;
             }
 
             // called when each sample completed.
@@ -319,7 +328,12 @@ namespace GitHub.secile.Video
             }
         }
 
-        private Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+#if USBCAMERA_WPF
+        private Func<BitmapSource>
+#else
+        private Func<Bitmap>
+#endif
+        GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             var sampler = new SampleGrabberCallback();
             i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
@@ -327,7 +341,12 @@ namespace GitHub.secile.Video
         }
 
         /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
-        private Bitmap GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+#if USBCAMERA_WPF
+        private BitmapSource
+#else
+        private Bitmap
+#endif
+        GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             try
             {
@@ -339,7 +358,7 @@ namespace GitHub.secile.Video
                 if ((uint)ex.ErrorCode == VFW_E_WRONG_STATE)
                 {
                     // image data is not ready yet. return empty bitmap.
-                    return new Bitmap(width, height);
+                    return EmptyBitmap(width, height);
                 }
 
                 throw;
@@ -347,7 +366,12 @@ namespace GitHub.secile.Video
         }
 
         /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
-        private Bitmap GetBitmapFromSampleGrabberBufferMain(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+#if USBCAMERA_WPF
+        private BitmapSource
+#else
+        private Bitmap
+#endif
+        GetBitmapFromSampleGrabberBufferMain(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             // サンプルグラバから画像を取得するためには
             // まずサイズ0でGetCurrentBufferを呼び出しバッファサイズを取得し
@@ -366,21 +390,63 @@ namespace GitHub.secile.Video
             Marshal.Copy(ptr, data, 0, sz);
 
             // 画像を作成
-            var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-            var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-
-            // 上下反転させながら1行ごとコピー
-            for (int y = 0; y < height; y++)
-            {
-                var src_idx = sz - (stride * (y + 1)); // 最終行から
-                var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
-                Marshal.Copy(data, src_idx, dst, stride);
-            }
-            result.UnlockBits(bmp_data);
+            var result = BufferToBitmap(data, width, height, stride);
+            
             Marshal.FreeCoTaskMem(ptr);
 
             return result;
         }
+
+#if USBCAMERA_WPF
+        private static BitmapSource BufferToBitmap(byte[] buffer, int width, int height, int stride)
+        {
+            const double dpi = 96.0;
+            var result = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
+
+            var lenght = height * stride;
+            var pixels = new byte[lenght];
+
+            // copy from last row.
+            for (int y = 0; y < height; y++)
+            {
+                var src_idx = buffer.Length - (stride * (y + 1));
+                Buffer.BlockCopy(buffer, src_idx, pixels, stride * y, stride);
+            }
+
+            result.WritePixels(new Int32Rect(0, 0, width, height), pixels, stride, 0);
+
+            return result;
+        }
+
+        private static BitmapSource EmptyBitmap(int width, int height)
+        {
+            return new WriteableBitmap(width, height, 96.0, 96.0, PixelFormats.Bgr24, null);
+        }
+#else
+        private static Bitmap BufferToBitmap(byte[] buffer, int width, int height, int stride)
+        {
+            var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+            var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+            
+            // copy from last row.
+            for (int y = 0; y < height; y++)
+            {
+                var src_idx = buffer.Length - (stride * (y + 1));
+                var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
+                Marshal.Copy(buffer, src_idx, dst, stride);
+            }
+            result.UnlockBits(bmp_data);
+
+            return result;
+        }
+
+        private static Bitmap EmptyBitmap(int width, int height)
+        {
+            return new Bitmap(width, height);
+        }
+#endif
+
+
 
         /// <summary>
         /// サンプルグラバを作成する
@@ -644,14 +710,14 @@ namespace GitHub.secile.Video
             if (mt.FormatType == DirectShow.DsGuid.FORMAT_VideoInfo)
             {
                 var vinfo = PtrToStructure<DirectShow.VIDEOINFOHEADER>(mt.pbFormat);
-                if (!size.IsEmpty) { vinfo.bmiHeader.biWidth = size.Width; vinfo.bmiHeader.biHeight = size.Height; }
+                if (!size.IsEmpty) { vinfo.bmiHeader.biWidth = (int)size.Width; vinfo.bmiHeader.biHeight = (int)size.Height; }
                 if (timePerFrame > 0) { vinfo.AvgTimePerFrame = timePerFrame; }
                 Marshal.StructureToPtr(vinfo, mt.pbFormat, true);
             }
             else if (mt.FormatType == DirectShow.DsGuid.FORMAT_VideoInfo2)
             {
                 var vinfo = PtrToStructure<DirectShow.VIDEOINFOHEADER2>(mt.pbFormat);
-                if (!size.IsEmpty) { vinfo.bmiHeader.biWidth = size.Width; vinfo.bmiHeader.biHeight = size.Height; }
+                if (!size.IsEmpty) { vinfo.bmiHeader.biWidth = (int)size.Width; vinfo.bmiHeader.biHeight = (int)size.Height; }
                 if (timePerFrame > 0) { vinfo.AvgTimePerFrame = timePerFrame; }
                 Marshal.StructureToPtr(vinfo, mt.pbFormat, true);
             }
