@@ -49,7 +49,7 @@ namespace GitHub.secile.Video
 
     // [Note]
     // By default, GetBitmap() returns image of System.Drawing.Bitmap.
-    // If WPF, define 'USECAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
+    // If WPF, define 'USBCAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
 
     class UsbCamera
     {
