@@ -213,7 +213,10 @@ namespace GitHub.secile.Video
                             if (cam_ctrl == null) throw new NotSupportedException("no IAMCameraControl Interface."); // will catched.
                             int min = 0, max = 0, step = 0, def = 0, flags = 0;
                             cam_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); // COMException if not supports.
-                            prop = new Property(min, max, step, def, flags, (flag, value) => cam_ctrl.Set(item, value, (int)flag));
+
+                            Action<DirectShow.CameraControlFlags, int> set = (flag, value) => cam_ctrl.Set(item, value, (int)flag);
+                            Func<int> get = () => { int value = 0; cam_ctrl.Get(item, ref value, ref flags); return value; };
+                            prop = new Property(min, max, step, def, flags, set, get);
                         }
                         catch (Exception) { prop = new Property(); } // available = false
                         return new { Key = item, Value = prop };
@@ -230,7 +233,10 @@ namespace GitHub.secile.Video
                             if (vid_ctrl == null) throw new NotSupportedException("no IAMVideoProcAmp Interface."); // will catched.
                             int min = 0, max = 0, step = 0, def = 0, flags = 0;
                             vid_ctrl.GetRange(item, ref min, ref max, ref step, ref def, ref flags); // COMException if not supports.
-                            prop = new Property(min, max, step, def, flags, (flag, value) => vid_ctrl.Set(item, value, (int)flag));
+
+                            Action<DirectShow.CameraControlFlags, int> set = (flag, value) => vid_ctrl.Set(item, value, (int)flag);
+                            Func<int> get = () => { int value = 0; vid_ctrl.Get(item, ref value, ref flags); return value; };
+                            prop = new Property(min, max, step, def, flags, set, get);
                         }
                         catch (Exception) { prop = new Property(); } // available = false
                         return new { Key = item, Value = prop };
@@ -257,6 +263,7 @@ namespace GitHub.secile.Video
                 public int Default { get; private set; }
                 public DirectShow.CameraControlFlags Flags { get; private set; }
                 public Action<DirectShow.CameraControlFlags, int> SetValue { get; private set; }
+                public Func<int> GetValue { get; private set; }
                 public bool Available { get; private set; }
                 public bool CanAuto { get; private set; }
 
@@ -266,7 +273,7 @@ namespace GitHub.secile.Video
                     this.Available = false;
                 }
 
-                public Property(int min, int max, int step, int @default, int flags, Action<DirectShow.CameraControlFlags, int> set)
+                public Property(int min, int max, int step, int @default, int flags, Action<DirectShow.CameraControlFlags, int> set, Func<int> get)
                 {
                     this.Min = min;
                     this.Max = max;
@@ -275,6 +282,7 @@ namespace GitHub.secile.Video
                     this.Flags = (DirectShow.CameraControlFlags)flags;
                     this.CanAuto = (Flags & DirectShow.CameraControlFlags.Auto) == DirectShow.CameraControlFlags.Auto;
                     this.SetValue = set;
+                    this.GetValue = get;
                     this.Available = true;
                 }
 
