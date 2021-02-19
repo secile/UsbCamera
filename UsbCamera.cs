@@ -174,7 +174,7 @@ namespace GitHub.secile.Video
 
                 Size = new Size(width, height);
 
-                // fix screen tearing problem(issure #2)
+                // fix screen tearing problem(issue #2)
                 // you can use previous method if you swap the comment line below.
                 // GetBitmap = () => GetBitmapFromSampleGrabberBuffer(i_grabber, width, height, stride);
                 GetBitmap = GetBitmapFromSampleGrabberCallback(i_grabber, width, height, stride);
