@@ -74,4 +74,4 @@ This project make use of a part of source code of the project below. Thank you!
 You can make H264 recorder by using UsbCamera and OpenH264Lib.NET and [AviWriter](https://github.com/secile/MotionJPEGWriter/blob/master/source/AviWriter.cs)(in MotionJPEGWriter).  
 See README.md in [OpenH264Lib.NET](https://github.com/secile/OpenH264Lib.NET).
 
-If you are going to record movie with audio, see README.md in [AudioIO](https://github.com/secile/AudioIO).
+You can make MotionJPEG movie with audio, see README.md in [AudioIO](https://github.com/secile/AudioIO).
