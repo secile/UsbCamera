@@ -45,11 +45,14 @@ UsbCamera.PropertyItems.Property prop;
 prop = camera.Properties[DirectShow.CameraControlProperty.Exposure];
 if (prop.Available)
 {
+    // get current value
+    var val = prop.GetValue();
+    // set new value
     var min = prop.Min;
     var max = prop.Max;
     var def = prop.Default;
     var step = prop.Step;
-    prop.SetValue(DirectShow.CameraControlFlags.Manual, prop.Default);
+    prop.SetValue(DirectShow.CameraControlFlags.Manual, def);
 }
 
 prop = camera.Properties[DirectShow.VideoProcAmpProperty.WhiteBalance];
@@ -58,10 +61,6 @@ if (prop.Available && prop.CanAuto)
     prop.SetValue(DirectShow.CameraControlFlags.Auto, 0);
 }
 ```
-
-# No external library required.
-Previos version, this project used external library.
-But now, no need to add external library to your project.
 
 # Special Thanks.
 This project make use of a part of source code of the project below. Thank you!   
