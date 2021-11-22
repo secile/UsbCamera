@@ -37,6 +37,7 @@ this.FormClosing += (s, ev) => camera.Stop();
 # if WPF
 By default, GetBitmap() returns image of System.Drawing.Bitmap.  
 If WPF, define 'USBCAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
+<img src="https://user-images.githubusercontent.com/29785639/142785991-c1f42bd1-6bea-459b-99c7-a0c8c175ce1e.png" width="360">
 
 # Adjust Tilt, Zoom, Exposure, Brightness, Contrast, etc...
 ```C#
