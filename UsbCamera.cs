@@ -322,9 +322,19 @@ namespace GitHub.secile.Video
                     Buffer = new byte[BufferLen];
                 }
 
-                lock (BufferLock)
+                // replace lock statement to Monitor.TryEnter. (issue #14)
+                var locked = false;
+                try
                 {
-                    Marshal.Copy(pBuffer, Buffer, 0, BufferLen);
+                    System.Threading.Monitor.TryEnter(BufferLock, 0, ref locked);
+                    if (locked)
+                    {
+                        Marshal.Copy(pBuffer, Buffer, 0, BufferLen);
+                    }
+                }
+                finally
+                {
+                    if (locked) System.Threading.Monitor.Exit(BufferLock);
                 }
                 return 0;
             }
