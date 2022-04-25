@@ -73,6 +73,15 @@ namespace GitHub.secile.Video
         public Func<Bitmap> GetBitmap { get; private set; }
 #endif
 
+        private Action<IntPtr, Size> SetPreviewControlMain;
+
+        /// <summary>Set preview on control. Call before starts.</summary>
+        /// <param name="handle">control handle.</param>
+        public void SetPreviewControl(IntPtr handle, Size size) { SetPreviewControlMain(handle, size); }
+
+        /// <summary>Set preview size.</summary>
+        public void SetPreviewSize(Size size) { SetPreviewControlMain(IntPtr.Zero, size); }
+
         /// <summary>
         /// Get available USB camera list.
         /// </summary>
@@ -179,6 +188,47 @@ namespace GitHub.secile.Video
                 // GetBitmap = () => GetBitmapFromSampleGrabberBuffer(i_grabber, width, height, stride);
                 GetBitmap = GetBitmapFromSampleGrabberCallback(i_grabber, width, height, stride);
             }
+
+            var setPreviewHandle = IntPtr.Zero;
+            SetPreviewControlMain = (controlHandle, clientSize) =>
+            {
+                var vw = graph as DirectShow.IVideoWindow;
+                if (vw == null) return;
+
+                // +--------------------+  +----------------+
+                // |         preview pin|→| Video Renderer |
+                // |                    |  +----------------+
+                // |Video Capture Source|
+                // |                    |  +----------------+  +---------------+
+                // |         capture pin|→| Sample Grabber |→| Null Renderer |
+                // +--------------------+  +----------------+  +---------------+
+                //                                 ↓GetBitmap()
+
+                if (setPreviewHandle == IntPtr.Zero)
+                {
+                    setPreviewHandle = controlHandle;
+                    pinCategory = DirectShow.DsGuid.PIN_CATEGORY_PREVIEW;
+                    builder.RenderStream(ref pinCategory, ref mediaType, vcap_source, null, null);
+                    vw.put_Owner(controlHandle);
+                }
+
+                // calc window size and position with keep aspect.
+                var w = clientSize.Width;
+                var h = Size.Height * w / Size.Width;
+                if (h > clientSize.Height)
+                {
+                    h = clientSize.Height;
+                    w = Size.Width * h / Size.Height;
+                }
+                var x = (clientSize.Width - w) / 2;
+                var y = (clientSize.Height - h) / 2;
+
+                // set window owner.
+                const int WS_CHILD = 0x40000000; // cannot have a menu bar. 
+                const int WS_CLIPSIBLINGS = 0x04000000; // clips child windows relative to each other when receives a WM_PAINT.
+                vw.put_WindowStyle(WS_CHILD | WS_CLIPSIBLINGS);
+                vw.SetWindowPosition((int)x, (int)y, (int)w, (int)h);
+            };
 
             // Assign Delegates.
             Start = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Running);
@@ -1255,6 +1305,53 @@ namespace GitHub.secile.Video
             int SampleCB(double SampleTime, IMediaSample pSample);
             [PreserveSig()]
             int BufferCB(double SampleTime, IntPtr pBuffer, int BufferLen);
+        }
+
+        /// <summary>
+        /// ビデオ ウィンドウのプロパティを設定するメソッドを提供するインタフェース.
+        /// </summary>
+        [ComVisible(true), ComImport(), Guid("56a868b4-0ad4-11ce-b03a-0020af0ba770"), InterfaceType(ComInterfaceType.InterfaceIsDual)]
+        public interface IVideoWindow
+        {
+            int put_Caption(string caption);
+            int get_Caption([In, Out] ref string caption);
+            int put_WindowStyle(int windowStyle);
+            int get_WindowStyle(ref int windowStyle);
+            int put_WindowStyleEx(int windowStyleEx);
+            int get_WindowStyleEx(ref int windowStyleEx);
+            int put_AutoShow(int autoShow);
+            int get_AutoShow(ref int autoShow);
+            int put_WindowState(int windowState);
+            int get_WindowState(ref int windowState);
+            int put_BackgroundPalette(int backgroundPalette);
+            int get_BackgroundPalette(ref int backgroundPalette);
+            int put_Visible(int visible);
+            int get_Visible(ref int visible);
+            int put_Left(int left);
+            int get_Left(ref int left);
+            int put_Width(int width);
+            int get_Width(ref int width);
+            int put_Top(int top);
+            int get_Top(ref int top);
+            int put_Height(int height);
+            int get_Height(ref int height);
+            int put_Owner(IntPtr owner);
+            int get_Owner(ref IntPtr owner);
+            int put_MessageDrain(IntPtr drain);
+            int get_MessageDrain(ref IntPtr drain);
+            int get_BorderColor(ref int color);
+            int put_BorderColor(int color);
+            int get_FullScreenMode(ref int fullScreenMode);
+            int put_FullScreenMode(int fullScreenMode);
+            int SetWindowForeground(int focus);
+            int NotifyOwnerMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+            int SetWindowPosition(int left, int top, int width, int height);
+            int GetWindowPosition(ref int left, ref int top, ref int width, ref int height);
+            int GetMinIdealImageSize(ref int width, ref int height);
+            int GetMaxIdealImageSize(ref int width, ref int height);
+            int GetRestorePosition(ref int left, ref int top, ref int width, ref int height);
+            int HideCursor(int HideCursorValue);
+            int IsCursorHidden(ref int hideCursor);
         }
 
         #endregion
