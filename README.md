@@ -4,6 +4,7 @@ With only single CSharp source code. No external library required.
 
 # How to use
 Add UsbCamera.cs to your project.  
+Following is how to use. see also SampleProject.  
 ```C#
 // [How to use]
 // check USB camera is available.
