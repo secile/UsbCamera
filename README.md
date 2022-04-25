@@ -43,9 +43,30 @@ var bmp = camera.GetBitmap();
 ```
 
 # if WPF
+## define symbol
 By default, GetBitmap() returns image of System.Drawing.Bitmap.  
 If WPF, define 'USBCAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
 <img src="https://user-images.githubusercontent.com/29785639/142785991-c1f42bd1-6bea-459b-99c7-a0c8c175ce1e.png" width="360">
+
+## Show preview on control in WPF.
+SetPreviewControl requires window handle but WPF control does not have handle.  
+it is recommended to use PictureBox with WindowsFormsHost.
+```C#
+var handle = pictureBox.Handle;
+camera.SetPreviewControl(handle, new Size(320, 240));
+```
+or use
+```C#
+var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+camera.SetPreviewControl(handle, new Size(320, 240));
+```
+or use this conventional way. (works little heavy)
+```C#
+var timer = new System.Timers.Timer(1000 / 30);
+timer.Elapsed += (s, ev) => Dispatcher.Invoke(() => image.Source = camera.GetBitmap());
+timer.Start();
+this.Closing += (s, ev) => timer.Stop();
+```
 
 # Adjust Tilt, Zoom, Exposure, Brightness, Contrast, etc...
 ```C#
