@@ -54,7 +54,7 @@ namespace UsbCameraWpf
 
             // or use this conventional way. (works little heavy)
             //var timer = new System.Timers.Timer(1000 / 30);
-            //timer.Elapsed += (s, ev) => Dispatcher.Invoke(() => image1.Source = camera.GetBitmap());
+            //timer.Elapsed += (s, ev) => Dispatcher.Invoke(() => image.Source = camera.GetBitmap());
             //timer.Start();
             //this.Closing += (s, ev) => timer.Stop();
 
