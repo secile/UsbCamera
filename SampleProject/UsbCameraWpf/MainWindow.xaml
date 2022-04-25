@@ -1,0 +1,17 @@
+﻿<Window x:Class="UsbCameraWpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:wfc ="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"
+        xmlns:local="clr-namespace:UsbCameraWpf"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="450" Width="800">
+    <Grid Loaded="Window_Loaded">
+        <WindowsFormsHost HorizontalAlignment="Left" Height="240" Margin="10,10,0,0" VerticalAlignment="Top" Width="320">
+            <wfc:PictureBox x:Name="pictureBox" />
+        </WindowsFormsHost>
+        <Button x:Name="button" Content="GetBitmap" HorizontalAlignment="Left" Margin="335,36,0,0" VerticalAlignment="Top" Width="75"/>
+        <Image x:Name="image" HorizontalAlignment="Left" Height="240" Margin="415,10,0,0" VerticalAlignment="Top" Width="320"/>
+    </Grid>
+</Window>
