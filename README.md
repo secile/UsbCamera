@@ -10,28 +10,35 @@ Add UsbCamera.cs to your project.
 string[] devices = UsbCamera.FindDevices();
 if (devices.Length == 0) return; // no camera.
             
-// check format.
-int cameraIndex = 0;
-UsbCamera.VideoFormat[] formats = UsbCamera.GetVideoFormat(cameraIndex);
-for(int i=0; i<formats.Length; i++) Console.WriteLine("{0}:{1}", i, formats[i]);
+// get video format.
+var cameraIndex = 0;
+var formats = UsbCamera.GetVideoFormat(cameraIndex);
+
+// select the format you want.
+foreach (var item in formats) Console.WriteLine(item);
+// for example, video format is like as follows.
+// 0:[Video], [MJPG], {Width=1280, Height=720}, 333333, [VideoInfo], ...
+// 1:[Video], [MJPG], {Width=320, Height=180}, 333333, [VideoInfo], ...
+// 2:[Video], [MJPG], {Width=320, Height=240}, 333333, [VideoInfo], ...
+// ...
+var format = formats[0];
             
-// create usb camera and start.
-var camera = new UsbCamera(cameraIndex, formats[0]);
+// create instance.
+var camera = new UsbCamera(cameraIndex, format);
+// this closing event handler make sure that the instance is not subject to garbage collection.
+this.FormClosing += (s, ev) => camera.Release(); // release when close.
+
+// show preview on control.
+camera.SetPreviewControl(pictureBox1.Handle, pictureBox1.ClientSize);
+pictureBox1.Resize += (s, ev) => camera.SetPreviewSize(pictureBox1.ClientSize); // support resize.
+
+// start.
 camera.Start();
             
 // get image.
 // Immediately after starting the USB camera,
 // GetBitmap() fails because image buffer is not prepared yet.
 var bmp = camera.GetBitmap();
-            
-// show image in PictureBox.
-var timer = new System.Timers.Timer(100) { SynchronizingObject = this };
-timer.Elapsed += (s, ev) => pbxScreen.Image = camera.GetBitmap();
-timer.Start();
-
-// release resource when close.
-this.FormClosing += (s, ev) => timer.Stop();
-this.FormClosing += (s, ev) => camera.Stop();
 ```
 
 # if WPF
