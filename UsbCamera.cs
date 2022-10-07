@@ -578,6 +578,9 @@ namespace GitHub.secile.Video
 
             result.WritePixels(new Int32Rect(0, 0, width, height), pixels, stride, 0);
 
+            // if no Freeze(), StillImageCaptured image is not displayed in WPF.
+            result.Freeze();
+
             return result;
         }
 
