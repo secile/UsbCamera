@@ -64,11 +64,36 @@ namespace GitHub.secile.Video
         public Action Stop { get; private set; }
 
         /// <summary>Release resource.</summary>
-        public Action Release { get; private set; }
+        public void Release()
+        {
+            Releasing();
+            Released();
+        }
+
+        private Action Releasing;
+        private Action Released;
 
         /// <summary>Get image.</summary>
         /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
         public Func<Bitmap> GetBitmap { get; private set; }
+
+        /// <summary>
+        /// camera support still image or not.
+        /// some cameras can produce a still image and often higher quality than capture stream.
+        /// </summary>
+        public bool StillImageAvailable { get; private set; }
+
+        /// <summary>trigger still image capture.</summary>
+        public Action StillImageTrigger { get; private set; } = () => { }; // null guard.
+
+        /// <summary>called when still image captured by hardware button or software trigger.</summary>
+        public Action<Bitmap> StillImageCaptured
+        {
+            get { return StillSampleGrabberCallback.Buffered; }
+            set { StillSampleGrabberCallback.Buffered = value; }
+        }
+
+        private SampleGrabberCallback StillSampleGrabberCallback;
 
         private Action<IntPtr, Size> SetPreviewControlMain;
 
@@ -138,6 +163,8 @@ namespace GitHub.secile.Video
             //                                 ↓GetBitmap()
 
             var graph = DirectShow.CreateGraph();
+            var builder = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_CaptureGraphBuilder2) as DirectShow.ICaptureGraphBuilder2;
+            builder.SetFiltergraph(graph);
 
             //----------------------------------
             // VideoCaptureSource
@@ -145,45 +172,53 @@ namespace GitHub.secile.Video
             var vcap_source = CreateVideoCaptureSource(index, format);
             graph.AddFilter(vcap_source, "VideoCapture");
 
-            //------------------------------
-            // SampleGrabber
-            //------------------------------
-            var grabber = CreateSampleGrabber();
-            graph.AddFilter(grabber, "SampleGrabber");
-            var i_grabber = (DirectShow.ISampleGrabber)grabber;
-            i_grabber.SetBufferSamples(true); //サンプルグラバでのサンプリングを開始
-
-            //---------------------------------------------------
-            // Null Renderer
-            //---------------------------------------------------
-            var renderer = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_NullRenderer) as DirectShow.IBaseFilter;
-            graph.AddFilter(renderer, "NullRenderer");
-
-            //---------------------------------------------------
-            // Create Filter Graph
-            //---------------------------------------------------
-            var builder = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_CaptureGraphBuilder2) as DirectShow.ICaptureGraphBuilder2;
-            builder.SetFiltergraph(graph);
-            var pinCategory = DirectShow.DsGuid.PIN_CATEGORY_CAPTURE;
-            var mediaType = DirectShow.DsGuid.MEDIATYPE_Video;
-            builder.RenderStream(ref pinCategory, ref mediaType, vcap_source, grabber, renderer);
-
-            // SampleGrabber Format.
+            // PIN_CATEGORY_CAPTURE
             {
-                var mt = new DirectShow.AM_MEDIA_TYPE();
-                i_grabber.GetConnectedMediaType(mt);
-                var header = (DirectShow.VIDEOINFOHEADER)Marshal.PtrToStructure(mt.pbFormat, typeof(DirectShow.VIDEOINFOHEADER));
-                var width = header.bmiHeader.biWidth;
-                var height = header.bmiHeader.biHeight;
-                var stride = width * (header.bmiHeader.biBitCount / 8);
-                DirectShow.DeleteMediaType(ref mt);
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_CAPTURE);
+                if (sample != null)
+                {
+                    // release when finish.
+                    Released += () => { var i_grabber = sample.Grabber; DirectShow.ReleaseInstance(ref i_grabber); };
 
-                Size = new Size(width, height);
+                    Size = new Size(sample.Width, sample.Height);
 
-                // fix screen tearing problem(issue #2)
-                // you can use previous method if you swap the comment line below.
-                // GetBitmap = () => GetBitmapFromSampleGrabberBuffer(i_grabber, width, height, stride);
-                GetBitmap = GetBitmapFromSampleGrabberCallback(i_grabber, width, height, stride);
+                    // fix screen tearing problem(issue #2)
+                    // you can use previous method if you swap the comment line below.
+                    // GetBitmap = () => GetBitmapFromSampleGrabberBuffer(sample.Grabber, sample.Width, sample.Height, sample.Stride);
+                    GetBitmap = GetBitmapFromSampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride);
+                }
+            }
+
+            // PIN_CATEGORY_STILL
+            {
+                // https://learn.microsoft.com/en-us/windows/win32/directshow/capturing-an-image-from-a-still-image-pin
+                // Some cameras can produce a still image separate from the capture stream,
+                // and often the still image is of higher quality than the images produced by the capture stream.
+                // The camera may have a button that acts as a hardware trigger, or it may support software triggering.
+                // A camera that supports still images will expose a still image pin, which is pin category PIN_CATEGORY_STILL.
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_STILL);
+                if (sample != null)
+                {
+                    // release when finish.
+                    Released += () => { var i_grabber = sample.Grabber; DirectShow.ReleaseInstance(ref i_grabber); };
+
+                    var still_pin = DirectShow.FindPin(vcap_source, 0, DirectShow.PIN_DIRECTION.PINDIR_OUTPUT, DirectShow.DsGuid.PIN_CATEGORY_STILL);
+                    var video_con = vcap_source as DirectShow.IAMVideoControl;
+                    if (video_con != null)
+                    {
+                        StillImageAvailable = true;
+
+                        //var dummp = GetBitmapFromSampleGrabberCallback(grabber.Sampler, grabber.Width, grabber.Height, grabber.Stride);
+                        StillSampleGrabberCallback = new SampleGrabberCallback(sample.Width, sample.Height, sample.Stride);
+                        sample.Grabber.SetCallback(StillSampleGrabberCallback, 1); // WhichMethodToCallback = BufferCB
+
+                        // To trigger the still pin, use the IAMVideoControl::SetMode method when the graph is running, as follows:
+                        StillImageTrigger = () =>
+                        {
+                            video_con.SetMode(still_pin, DirectShow.VideoControlFlags.Trigger | DirectShow.VideoControlFlags.ExternalTriggerEnable);
+                        };
+                    }
+                }
             }
 
             var setPreviewHandle = IntPtr.Zero;
@@ -204,7 +239,8 @@ namespace GitHub.secile.Video
                 if (setPreviewHandle == IntPtr.Zero)
                 {
                     setPreviewHandle = controlHandle;
-                    pinCategory = DirectShow.DsGuid.PIN_CATEGORY_PREVIEW;
+                    var pinCategory = DirectShow.DsGuid.PIN_CATEGORY_PREVIEW;
+                    var mediaType = DirectShow.DsGuid.MEDIATYPE_Video;
                     builder.RenderStream(ref pinCategory, ref mediaType, vcap_source, null, null);
                     vw.put_Owner(controlHandle);
                 }
@@ -230,17 +266,69 @@ namespace GitHub.secile.Video
             // Assign Delegates.
             Start = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Running);
             Stop = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Stopped);
-            Release = () =>
+            Releasing += () => Stop();
+            Released += () =>
             {
-                Stop();
-
-                DirectShow.ReleaseInstance(ref i_grabber);
                 DirectShow.ReleaseInstance(ref builder);
                 DirectShow.ReleaseInstance(ref graph);
             };
 
             // Properties.
             Properties = new PropertyItems(vcap_source);
+        }
+
+        private class SampleGrabberInfo
+        {
+            public DirectShow.ISampleGrabber Grabber { get; set; }
+            public int Width { get; set; }
+            public int Height { get; set; }
+            public int Stride { get; set; }
+        }
+
+        private SampleGrabberInfo ConnectSampleGrabberAndRenderer(DirectShow.IFilterGraph graph, DirectShow.ICaptureGraphBuilder2 builder, DirectShow.IBaseFilter vcap_source, Guid pinCategory)
+        {
+            //------------------------------
+            // SampleGrabber
+            //------------------------------
+            var grabber = CreateSampleGrabber();
+            graph.AddFilter(grabber, "SampleGrabber");
+            var i_grabber = (DirectShow.ISampleGrabber)grabber;
+            i_grabber.SetBufferSamples(true);
+
+            //---------------------------------------------------
+            // Null Renderer
+            //---------------------------------------------------
+            var renderer = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_NullRenderer) as DirectShow.IBaseFilter;
+            graph.AddFilter(renderer, "NullRenderer");
+
+            //---------------------------------------------------
+            // Connects vcap_source to SampleGrabber and Renderer
+            //---------------------------------------------------
+            try
+            {
+                //var pinCategory = DirectShow.DsGuid.PIN_CATEGORY_CAPTURE;
+                var mediaType = DirectShow.DsGuid.MEDIATYPE_Video;
+                builder.RenderStream(ref pinCategory, ref mediaType, vcap_source, grabber, renderer);
+            }
+            catch (Exception)
+            {
+                // if camera does not support pin, an exception was raised.
+                // some camera do not support still pin.
+                return null;
+            }
+
+            // SampleGrabber Format.
+            {
+                var mt = new DirectShow.AM_MEDIA_TYPE();
+                i_grabber.GetConnectedMediaType(mt);
+                var header = (DirectShow.VIDEOINFOHEADER)Marshal.PtrToStructure(mt.pbFormat, typeof(DirectShow.VIDEOINFOHEADER));
+                var width = header.bmiHeader.biWidth;
+                var height = header.bmiHeader.biHeight;
+                var stride = width * (header.bmiHeader.biBitCount / 8);
+                DirectShow.DeleteMediaType(ref mt);
+
+                return new SampleGrabberInfo() { Grabber = i_grabber, Width = width, Height = height, Stride = stride };
+            }
         }
 
         /// <summary>Properties user can adjust.</summary>
@@ -466,7 +554,7 @@ namespace GitHub.secile.Video
 
             // 画像を作成
             var result = BufferToBitmap(data, width, height, stride);
-            
+
             Marshal.FreeCoTaskMem(ptr);
 
             return result;
@@ -502,7 +590,7 @@ namespace GitHub.secile.Video
         {
             var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
             var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-            
+
             // copy from last row.
             for (int y = 0; y < height; y++)
             {
@@ -520,8 +608,6 @@ namespace GitHub.secile.Video
             return new Bitmap(width, height);
         }
 #endif
-
-
 
         /// <summary>
         /// サンプルグラバを作成する
