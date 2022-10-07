@@ -954,7 +954,7 @@ namespace GitHub.secile.Video
         /// <summary>ピンを検索する。</summary>
         public static IPin FindPin(IBaseFilter filter, string name)
         {
-            var result = EnumPins(filter, (info) =>
+            var result = EnumPins(filter, (pin, info) =>
             {
                 return (info.achName == name);
             });
@@ -967,7 +967,7 @@ namespace GitHub.secile.Video
         public static IPin FindPin(IBaseFilter filter, int index, PIN_DIRECTION direction)
         {
             int curr_index = 0;
-            var result = EnumPins(filter, (info) =>
+            var result = EnumPins(filter, (pin, info) =>
             {
                 // directionを確認。
                 if (info.dir != direction) return false;
@@ -980,8 +980,49 @@ namespace GitHub.secile.Video
             return result;
         }
 
+        /// <summary>ピンを検索する。</summary>
+        public static IPin FindPin(IBaseFilter filter, int index, PIN_DIRECTION direction, Guid category)
+        {
+            int curr_index = 0;
+            var result = EnumPins(filter, (pin, info) =>
+            {
+                // directionを確認。
+                if (info.dir != direction) return false;
+
+                // categoryを確認。
+                if (GetPinCategory(pin) != category) return false;
+
+                // indexは最後にチェック。
+                return (index == curr_index++);
+            });
+
+            if (result == null) throw new ArgumentException("can't fild pin.");
+            return result;
+        }
+
+        private static Guid GetPinCategory(IPin pPin)
+        {
+            var kps = pPin as IKsPropertySet;
+            if (kps == null) return Guid.Empty;
+
+            var size = Marshal.SizeOf(typeof(Guid));
+            var ptr = Marshal.AllocCoTaskMem(size);
+
+            try
+            {
+                var hr = kps.Get(DirectShow.DsGuid.AMPROPSETID_PIN, (int)AMPropertyPin.Category, IntPtr.Zero, 0, ptr, size, out int cbBytes);
+                if (hr < 0) return Guid.Empty;
+
+                return (Guid)Marshal.PtrToStructure(ptr, typeof(Guid));
+            }
+            finally
+            {
+                Marshal.FreeCoTaskMem(ptr);
+            }
+        }
+
         /// <summary>Pinを列挙する。</summary>
-        private static IPin EnumPins(IBaseFilter filter, Func<PIN_INFO, bool> func)
+        private static IPin EnumPins(IBaseFilter filter, Func<IPin, PIN_INFO, bool> func)
         {
             IEnumPins pins = null;
             IPin ipin = null;
@@ -999,7 +1040,7 @@ namespace GitHub.secile.Video
                     try
                     {
                         ipin.QueryPinInfo(info);
-                        var rc = func(info);
+                        var rc = func(ipin, info);
                         if (rc) return ipin;
                     }
                     finally
@@ -1126,16 +1167,28 @@ namespace GitHub.secile.Video
             int Get([In] VideoProcAmpProperty Property, [In, Out] ref int lValue, [In, Out] ref int Flags);
         }
 
-
         [ComVisible(true), ComImport(), Guid("6A2E0670-28E4-11D0-A18C-00A0C9118956"), System.Security.SuppressUnmanagedCodeSecurity, InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         public interface IAMVideoControl
         {
-            int GetCaps([In] IPin pPin, [Out] out int pCapsFlags);
-            int SetMode([In] IPin pPin, [In] int Mode);
-            int GetMode([In] IPin pPin, [Out] out int Mode);
+            int GetCaps([In] IPin pPin, [Out] out VideoControlFlags pCapsFlags);
+            int SetMode([In] IPin pPin, [In] VideoControlFlags Mode);
+            int GetMode([In] IPin pPin, [Out] out VideoControlFlags Mode);
             int GetCurrentActualFrameRate([In] IPin pPin, [Out] out long ActualFrameRate);
             int GetMaxAvailableFrameRate([In] IPin pPin, [In] int iIndex, [In] Size Dimensions, [Out] out long MaxAvailableFrameRate);
             int GetFrameRateList([In] IPin pPin, [In] int iIndex, [In] Size Dimensions, [Out] out int ListSize, [Out] out IntPtr FrameRates);
+        }
+
+        [ComVisible(true), ComImport(), Guid("31EFAC30-515C-11d0-A9AA-00AA0061BE93"), System.Security.SuppressUnmanagedCodeSecurity, InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        public interface IKsPropertySet
+        {
+            [PreserveSig]
+            int Set([In, MarshalAs(UnmanagedType.LPStruct)] Guid guidPropSet, [In] int dwPropID, [In] IntPtr pInstanceData, [In] int cbInstanceData, [In] IntPtr pPropData, [In] int cbPropData);
+
+            [PreserveSig]
+            int Get([In, MarshalAs(UnmanagedType.LPStruct)] Guid guidPropSet, [In] int dwPropID, [In] IntPtr pInstanceData, [In] int cbInstanceData, [In, Out] IntPtr pPropData, [In] int cbPropData, [Out] out int pcbReturned);
+
+            [PreserveSig]
+            int QuerySupported([In, MarshalAs(UnmanagedType.LPStruct)] Guid guidPropSet, [In] int dwPropID, [Out] out int pTypeSupport);
         }
 
         [ComVisible(true), ComImport(), Guid("56a86895-0ad4-11ce-b03a-0020af0ba770"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -1533,6 +1586,21 @@ namespace GitHub.secile.Video
             Gain = 9
         }
 
+        [ComVisible(false)]
+        public enum AMPropertyPin
+        {
+            Category,
+            Medium
+        }
+
+        [ComVisible(false), Flags()]
+        public enum VideoControlFlags
+        {
+            FlipHorizontal = 0x01,
+            FlipVertical = 0x02,
+            ExternalTriggerEnable = 0x04,
+            Trigger = 0x08
+        }
         #endregion
 
 
@@ -1587,6 +1655,9 @@ namespace GitHub.secile.Video
             public static readonly Guid PIN_CATEGORY_CAPTURE = new Guid("{fb6c4281-0353-11d1-905f-0000c0cc16ba}");
             public static readonly Guid PIN_CATEGORY_PREVIEW = new Guid("{fb6c4282-0353-11d1-905f-0000c0cc16ba}");
             public static readonly Guid PIN_CATEGORY_STILL = new Guid("{fb6c428a-0353-11d1-905f-0000c0cc16ba}");
+
+
+            public static readonly Guid AMPROPSETID_PIN = new Guid("9b00f101-1567-11d1-b3f1-00aa003761c5");
 
             private static Dictionary<Guid, string> NicknameCache = null;
 
