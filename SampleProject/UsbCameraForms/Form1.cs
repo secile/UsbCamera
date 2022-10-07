@@ -52,6 +52,13 @@ namespace UsbCameraForms
 
             // get bitmap.
             button1.Click += (s, ev) => pictureBox2.Image = camera.GetBitmap();
+
+            // still image
+            if (camera.StillImageAvailable)
+            {
+                button2.Click += (s, ev) => camera.StillImageTrigger();
+                camera.StillImageCaptured += bmp => pictureBox2.Image = bmp;
+            }
         }
     }
 }
