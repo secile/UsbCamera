@@ -9,6 +9,7 @@ using System.Runtime.InteropServices.ComTypes;
 using System.Windows;               // Size
 using System.Windows.Media;         // PixelFormats
 using System.Windows.Media.Imaging; // BitmapSource
+using Bitmap = System.Windows.Media.Imaging.BitmapSource;
 #else
 using System.Drawing;
 #endif
@@ -67,11 +68,7 @@ namespace GitHub.secile.Video
 
         /// <summary>Get image.</summary>
         /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
-#if USBCAMERA_WPF
-        public Func<BitmapSource> GetBitmap { get; private set; }
-#else
         public Func<Bitmap> GetBitmap { get; private set; }
-#endif
 
         private Action<IntPtr, Size> SetPreviewControlMain;
 
@@ -348,12 +345,7 @@ namespace GitHub.secile.Video
             private byte[] Buffer;
             private object BufferLock = new object();
 
-#if USBCAMERA_WPF
-            public BitmapSource
-#else
-            public Bitmap
-#endif
-            GetBitmap(int width, int height, int stride)
+            public Bitmap GetBitmap(int width, int height, int stride)
             {
                 if (Buffer == null) return EmptyBitmap(width, height);
 
@@ -396,12 +388,7 @@ namespace GitHub.secile.Video
             }
         }
 
-#if USBCAMERA_WPF
-        private Func<BitmapSource>
-#else
-        private Func<Bitmap>
-#endif
-        GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+        private Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             var sampler = new SampleGrabberCallback();
             i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
@@ -409,12 +396,7 @@ namespace GitHub.secile.Video
         }
 
         /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
-#if USBCAMERA_WPF
-        private BitmapSource
-#else
-        private Bitmap
-#endif
-        GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+        private Bitmap GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             try
             {
@@ -434,12 +416,7 @@ namespace GitHub.secile.Video
         }
 
         /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
-#if USBCAMERA_WPF
-        private BitmapSource
-#else
-        private Bitmap
-#endif
-        GetBitmapFromSampleGrabberBufferMain(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
+        private Bitmap GetBitmapFromSampleGrabberBufferMain(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
             // サンプルグラバから画像を取得するためには
             // まずサイズ0でGetCurrentBufferを呼び出しバッファサイズを取得し
