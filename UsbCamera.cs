@@ -345,13 +345,39 @@ namespace GitHub.secile.Video
             private byte[] Buffer;
             private object BufferLock = new object();
 
-            public Bitmap GetBitmap(int width, int height, int stride)
+            public Action<Bitmap> Buffered { get; set; }
+
+            private System.Threading.AutoResetEvent BufferedEvent;
+
+            public int Width { get; private set; }
+            public int Height { get; private set; }
+            public int Stride { get; private set; }
+
+            public SampleGrabberCallback(int width, int height, int stride)
             {
-                if (Buffer == null) return EmptyBitmap(width, height);
+                this.Width = width;
+                this.Height = height;
+                this.Stride = stride;
+
+                // create Buffered.Invoke thread.
+                BufferedEvent = new System.Threading.AutoResetEvent(false);
+                System.Threading.ThreadPool.QueueUserWorkItem(x =>
+                {
+                    while (true)
+                    {
+                        BufferedEvent.WaitOne(); // wait event.
+                        Buffered?.Invoke(GetBitmap()); // fire!
+                    }
+                });
+            }
+
+            public Bitmap GetBitmap()
+            {
+                if (Buffer == null) return EmptyBitmap(Width, Height);
 
                 lock (BufferLock)
                 {
-                    return BufferToBitmap(Buffer, width, height, stride);
+                    return BufferToBitmap(Buffer, Width, Height, Stride);
                 }
             }
 
@@ -378,6 +404,10 @@ namespace GitHub.secile.Video
                 {
                     if (locked) System.Threading.Monitor.Exit(BufferLock);
                 }
+
+                // notify buffered to worker thread. (issue #16)
+                if (Buffered != null) BufferedEvent.Set();
+
                 return 0;
             }
 
@@ -390,9 +420,9 @@ namespace GitHub.secile.Video
 
         private Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber i_grabber, int width, int height, int stride)
         {
-            var sampler = new SampleGrabberCallback();
+            var sampler = new SampleGrabberCallback(width, height, stride);
             i_grabber.SetCallback(sampler, 1); // WhichMethodToCallback = BufferCB
-            return () => sampler.GetBitmap(width, height, stride);
+            return () => sampler.GetBitmap();
         }
 
         /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
