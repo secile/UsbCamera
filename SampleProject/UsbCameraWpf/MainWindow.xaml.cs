@@ -62,7 +62,14 @@ namespace UsbCameraWpf
             camera.Start();
 
             // get bitmap.
-            button.Click += (s, ev) => image.Source = camera.GetBitmap();
+            button1.Click += (s, ev) => image.Source = camera.GetBitmap();
+
+            // still image
+            if (camera.StillImageAvailable)
+            {
+                button2.Click += (s, ev) => camera.StillImageTrigger();
+                camera.StillImageCaptured += (bmp) => Dispatcher.Invoke(() => image.Source = bmp);
+            }
         }
     }
 }

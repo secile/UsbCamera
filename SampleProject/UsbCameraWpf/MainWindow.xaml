@@ -11,7 +11,8 @@
         <WindowsFormsHost HorizontalAlignment="Left" Height="240" Margin="10,10,0,0" VerticalAlignment="Top" Width="320">
             <wfc:PictureBox x:Name="pictureBox" />
         </WindowsFormsHost>
-        <Button x:Name="button" Content="GetBitmap" HorizontalAlignment="Left" Margin="335,36,0,0" VerticalAlignment="Top" Width="75"/>
+        <Button x:Name="button1" Content="GetBitmap" HorizontalAlignment="Left" Margin="335,36,0,0" VerticalAlignment="Top" Width="75"/>
+        <Button x:Name="button2" Content="StillImage" HorizontalAlignment="Left" Margin="335,61,0,0" VerticalAlignment="Top" Width="75"/>
         <Image x:Name="image" HorizontalAlignment="Left" Height="240" Margin="415,10,0,0" VerticalAlignment="Top" Width="320"/>
     </Grid>
 </Window>
