@@ -202,6 +202,7 @@ namespace GitHub.secile.Video
             // +--------------------+  +----------------+  +---------------+
             //                                 ↓GetBitmap()
             {
+                // support still image (issue #16)
                 // https://learn.microsoft.com/en-us/windows/win32/directshow/capturing-an-image-from-a-still-image-pin
                 // Some cameras can produce a still image separate from the capture stream,
                 // and often the still image is of higher quality than the images produced by the capture stream.
