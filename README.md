@@ -68,6 +68,19 @@ timer.Start();
 this.Closing += (s, ev) => timer.Stop();
 ```
 
+# Still image capture.
+Some cameras can produce a still image separate from the capture stream,  
+and often the still image is of higher quality than the images produced by the capture stream.  
+If your camera has a hardware button, your camera might supports still image capture. Push it, or call StillImageTrigger().  
+When you capture still image, you receive StillImageCaptured call back. 
+```C#
+if (camera.StillImageAvailable)
+{
+    button.Click += (s, ev) => camera.StillImageTrigger();
+    camera.StillImageCaptured += bmp => pictureBox.Image = bmp;
+}
+```
+
 # Adjust Tilt, Zoom, Exposure, Brightness, Contrast, etc...
 ```C#
 // adjust properties.
