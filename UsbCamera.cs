@@ -157,10 +157,6 @@ namespace GitHub.secile.Video
             //----------------------------------
             // Create Filter Graph
             //----------------------------------
-            // +--------------------+  +----------------+  +---------------+
-            // |Video Capture Source|→| Sample Grabber |→| Null Renderer |
-            // +--------------------+  +----------------+  +---------------+
-            //                                 ↓GetBitmap()
 
             var graph = DirectShow.CreateGraph();
             var builder = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_CaptureGraphBuilder2) as DirectShow.ICaptureGraphBuilder2;
@@ -173,6 +169,12 @@ namespace GitHub.secile.Video
             graph.AddFilter(vcap_source, "VideoCapture");
 
             // PIN_CATEGORY_CAPTURE
+            //
+            // [Video Capture Source]
+            // +--------------------+  +----------------+  +---------------+
+            // |         capture pin|→| Sample Grabber |→| Null Renderer |
+            // +--------------------+  +----------------+  +---------------+
+            //                                 ↓GetBitmap()
             {
                 var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_CAPTURE);
                 if (sample != null)
@@ -190,6 +192,15 @@ namespace GitHub.secile.Video
             }
 
             // PIN_CATEGORY_STILL
+            //
+            // [Video Capture Source]
+            // +--------------------+  +----------------+  +---------------+
+            // |           still pin|→| Sample Grabber |→| Null Renderer |
+            // |                    |  +----------------+  +---------------+
+            // |                    |  +----------------+  +---------------+
+            // |         capture pin|→| Sample Grabber |→| Null Renderer |
+            // +--------------------+  +----------------+  +---------------+
+            //                                 ↓GetBitmap()
             {
                 // https://learn.microsoft.com/en-us/windows/win32/directshow/capturing-an-image-from-a-still-image-pin
                 // Some cameras can produce a still image separate from the capture stream,
@@ -221,20 +232,24 @@ namespace GitHub.secile.Video
                 }
             }
 
+            // PIN_CATEGORY_PREVIEW
+            //
+            // [Video Capture Source]
+            // +--------------------+  +----------------+
+            // |         preview pin|→| Video Renderer |
+            // |                    |  +----------------+
+            // |                    |  +----------------+  +---------------+
+            // |           still pin|→| Sample Grabber |→| Null Renderer |
+            // |                    |  +----------------+  +---------------+
+            // |                    |  +----------------+  +---------------+
+            // |         capture pin|→| Sample Grabber |→| Null Renderer |
+            // +--------------------+  +----------------+  +---------------+
+            //                                 ↓GetBitmap()
             var setPreviewHandle = IntPtr.Zero;
             SetPreviewControlMain = (controlHandle, clientSize) =>
             {
                 var vw = graph as DirectShow.IVideoWindow;
                 if (vw == null) return;
-
-                // +--------------------+  +----------------+
-                // |         preview pin|→| Video Renderer |
-                // |                    |  +----------------+
-                // |Video Capture Source|
-                // |                    |  +----------------+  +---------------+
-                // |         capture pin|→| Sample Grabber |→| Null Renderer |
-                // +--------------------+  +----------------+  +---------------+
-                //                                 ↓GetBitmap()
 
                 if (setPreviewHandle == IntPtr.Zero)
                 {
@@ -263,7 +278,7 @@ namespace GitHub.secile.Video
                 vw.SetWindowPosition((int)x, (int)y, (int)w, (int)h);
             };
 
-            // Assign Delegates.
+            // Start, Stop, Release, the filter graph.
             Start = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Running);
             Stop = () => DirectShow.PlayGraph(graph, DirectShow.FILTER_STATE.Stopped);
             Releasing += () => Stop();
