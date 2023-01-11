@@ -24,52 +24,13 @@ namespace UsbCameraWpf
         public MainWindow()
         {
             InitializeComponent();
+
+            this.DataContext = new MainWindowViewModel();
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            // find device.
-            var devices = UsbCamera.FindDevices();
-            if (devices.Length == 0) return; // no device.
 
-            // get video format.
-            var cameraIndex = 0;
-            var formats = UsbCamera.GetVideoFormat(cameraIndex);
-
-            // select the format you want.
-            foreach (var item in formats) Console.WriteLine(item);
-            var format = formats[0];
-
-            // create instance.
-            var camera = new UsbCamera(cameraIndex, format);
-            // this closing event hander make sure that the instance is not subject to garbage collection.
-            this.Closing += (s, ev) => camera.Release(); // release when close.
-
-            // show preview on control. (works light.)
-            // SetPreviewControl requires window handle but WPF control does not have handle.
-            // it is recommended to use PictureBox with WindowsFormsHost.
-            // or use handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-            var handle = pictureBox.Handle;
-            camera.SetPreviewControl(handle, new Size(320, 240));
-
-            // or use this conventional way. (works little heavy)
-            //var timer = new System.Timers.Timer(1000 / 30);
-            //timer.Elapsed += (s, ev) => Dispatcher.Invoke(() => image.Source = camera.GetBitmap());
-            //timer.Start();
-            //this.Closing += (s, ev) => timer.Stop();
-
-            // start.
-            camera.Start();
-
-            // get bitmap.
-            button1.Click += (s, ev) => image.Source = camera.GetBitmap();
-
-            // still image
-            if (camera.StillImageAvailable)
-            {
-                button2.Click += (s, ev) => camera.StillImageTrigger();
-                camera.StillImageCaptured += (bmp) => Dispatcher.Invoke(() => image.Source = bmp);
-            }
         }
     }
 }
