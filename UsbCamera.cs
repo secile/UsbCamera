@@ -259,6 +259,7 @@ namespace GitHub.secile.Video
                     var mediaType = DirectShow.DsGuid.MEDIATYPE_Video;
                     builder.RenderStream(ref pinCategory, ref mediaType, vcap_source, null, null);
                     vw.put_Owner(controlHandle);
+                    vw.put_MessageDrain(controlHandle); // receive window messages sent to the video renderer.(issue #21)
                 }
 
                 // calc window size and position with keep aspect.
