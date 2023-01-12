@@ -95,14 +95,19 @@ namespace GitHub.secile.Video
 
         private SampleGrabberCallback StillSampleGrabberCallback;
 
-        private Action<IntPtr, Size> SetPreviewControlMain;
+        private Action<IntPtr> SetPreviewControlMain;
+        private Action<Size> SetPreviewControlSizeMain;
 
         /// <summary>Set preview on control. Call before starts.</summary>
         /// <param name="handle">control handle.</param>
-        public void SetPreviewControl(IntPtr handle, Size size) { SetPreviewControlMain(handle, size); }
+        public void SetPreviewControl(IntPtr handle, Size size)
+        {
+            SetPreviewControlMain(handle);
+            SetPreviewControlSizeMain(size);
+        }
 
         /// <summary>Set preview size.</summary>
-        public void SetPreviewSize(Size size) { SetPreviewControlMain(IntPtr.Zero, size); }
+        public void SetPreviewSize(Size size) { SetPreviewControlSizeMain(size); }
 
         /// <summary>
         /// Get available USB camera list.
@@ -176,7 +181,7 @@ namespace GitHub.secile.Video
             // +--------------------+  +----------------+  +---------------+
             //                                 ↓GetBitmap()
             {
-                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_CAPTURE, RendererType.Null);
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_CAPTURE);
                 if (sample != null)
                 {
                     // release when finish.
@@ -208,7 +213,7 @@ namespace GitHub.secile.Video
                 // and often the still image is of higher quality than the images produced by the capture stream.
                 // The camera may have a button that acts as a hardware trigger, or it may support software triggering.
                 // A camera that supports still images will expose a still image pin, which is pin category PIN_CATEGORY_STILL.
-                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_STILL, RendererType.Null);
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_STILL);
                 if (sample != null)
                 {
                     // release when finish.
@@ -262,22 +267,30 @@ namespace GitHub.secile.Video
             // * Running a full-screen DOS window.
             // Any of these events might interrupt the capture session, possibly causing data loss.
 
-            var setPreviewHandle = IntPtr.Zero;
-            SetPreviewControlMain = (controlHandle, clientSize) =>
+            var makePreviewRender = false;
+            SetPreviewControlMain = (controlHandle) =>
             {
                 var vw = graph as DirectShow.IVideoWindow;
                 if (vw == null) return;
 
-                if (setPreviewHandle == IntPtr.Zero)
+                // render stream only the first time.
+                if (makePreviewRender == false)
                 {
-                    var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_PREVIEW, RendererType.Default);
-                    if (sample != null)
-                    {
-                        setPreviewHandle = controlHandle;
-                        vw.put_Owner(controlHandle);
-                        vw.put_MessageDrain(controlHandle); // receive window messages sent to the video renderer.(issue #21)
-                    }
+                    makePreviewRender = true;
+
+                    var pinCategory = DirectShow.DsGuid.PIN_CATEGORY_PREVIEW;
+                    var mediaType = DirectShow.DsGuid.MEDIATYPE_Video;
+                    builder.RenderStream(ref pinCategory, ref mediaType, vcap_source, null, null);
                 }
+
+                vw.put_Owner(controlHandle);
+                vw.put_MessageDrain(controlHandle); // receive window messages sent to the video renderer.(issue #21)
+            };
+
+            SetPreviewControlSizeMain = (clientSize) =>
+            {
+                var vw = graph as DirectShow.IVideoWindow;
+                if (vw == null) return;
 
                 // calc window size and position with keep aspect.
                 var w = clientSize.Width;
@@ -319,9 +332,7 @@ namespace GitHub.secile.Video
             public int Stride { get; set; }
         }
 
-        private enum RendererType { Null, Default }
-
-        private SampleGrabberInfo ConnectSampleGrabberAndRenderer(DirectShow.IFilterGraph graph, DirectShow.ICaptureGraphBuilder2 builder, DirectShow.IBaseFilter vcap_source, Guid pinCategory, RendererType rendererType)
+        private SampleGrabberInfo ConnectSampleGrabberAndRenderer(DirectShow.IFilterGraph graph, DirectShow.ICaptureGraphBuilder2 builder, DirectShow.IBaseFilter vcap_source, Guid pinCategory)
         {
             //------------------------------
             // SampleGrabber
@@ -334,12 +345,8 @@ namespace GitHub.secile.Video
             //---------------------------------------------------
             // Null Renderer
             //---------------------------------------------------
-            DirectShow.IBaseFilter renderer = null;
-            if (rendererType == RendererType.Null)
-            {
-                renderer = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_NullRenderer) as DirectShow.IBaseFilter;
-                graph.AddFilter(renderer, "NullRenderer");
-            }
+            var renderer = DirectShow.CoCreateInstance(DirectShow.DsGuid.CLSID_NullRenderer) as DirectShow.IBaseFilter;
+            graph.AddFilter(renderer, "NullRenderer");
 
             //---------------------------------------------------
             // Connects vcap_source to SampleGrabber and Renderer
@@ -468,7 +475,7 @@ namespace GitHub.secile.Video
                 }
             }
         }
-
+        
         private Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
         {
             var sampler = new SampleGrabberCallback(grabber, width, height, stride);
@@ -481,7 +488,7 @@ namespace GitHub.secile.Video
             var sampler = new SampleGrabberBuffer(grabber, width, height, stride);
             return () => sampler.GetBitmap();
         }
-
+        
         private class SampleGrabberCallback : DirectShow.ISampleGrabberCB
         {
             private byte[] Buffer;
