@@ -1,5 +1,5 @@
 # UsbCamera
-C# source code for using USB camera in WinForms/WPF.  
+C# source code for using web camera via USB in WinForms/WPF.  
 With only single CSharp source code. No external library required.
 
 # How to use
@@ -42,30 +42,41 @@ camera.Start();
 var bmp = camera.GetBitmap();
 ```
 
-# if WPF
-## define 'USBCAMERA_WPF' symbol
+# WPF support.
 By default, GetBitmap() returns image of System.Drawing.Bitmap.  
-If WPF, define 'USBCAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
+In WPF, define 'USBCAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
 <img src="https://user-images.githubusercontent.com/29785639/142785991-c1f42bd1-6bea-459b-99c7-a0c8c175ce1e.png" width="360">
 
-## Show preview on control in WPF.
-SetPreviewControl requires window handle but WPF control does not have handle.  
+# Show preview.
+There are 3 ways to show preview.
+
+1. use SetPreviewControl.  
+in WinForms, this works light, less GC, and recommended way.  
+in WPF, SetPreviewControl requires window handle but WPF control does not have handle.
 it is recommended to use PictureBox with WindowsFormsHost.
 ```C#
 var handle = pictureBox.Handle;
 camera.SetPreviewControl(handle, new Size(320, 240));
 ```
-or use
+
+2. subscribe PreviewCaptured.  
+in WPF with data binding, this is less GC, and recommended way.  
 ```C#
-var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-camera.SetPreviewControl(handle, new Size(320, 240));
+camera.PreviewCaptured += (bmp) =>
+{
+    Preview = bmp;
+    OnPropertyChanged("Preview");
+};
 ```
-or use this conventional way. (works little heavy)
+
+3. use Timer and GetBitmap().  
+in WinForms, use System.Timers.Timer.  
+in WPF, use DispatcherTimer.
 ```C#
-var timer = new System.Timers.Timer(1000 / 30);
-timer.Elapsed += (s, ev) => Dispatcher.Invoke(() => image.Source = camera.GetBitmap());
+var timer = new System.Timers.Timer(1000 / 30) { SynchronizingObject = this };
+timer.Elapsed += (s, ev) => pictureBox.Image = camera.GetBitmap();
 timer.Start();
-this.Closing += (s, ev) => timer.Stop();
+this.FormClosing += (s, ev) => timer.Stop();
 ```
 
 # Still image capture.
