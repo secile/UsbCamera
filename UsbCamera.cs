@@ -77,6 +77,9 @@ namespace GitHub.secile.Video
         /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
         public Func<Bitmap> GetBitmap { get; private set; }
 
+        public enum StreamType { Capture, Preview, Still }
+        private Dictionary<StreamType, SampleGrabberCallback> Streams = new Dictionary<StreamType, SampleGrabberCallback>();
+
         /// <summary>
         /// camera support still image or not.
         /// some cameras can produce a still image and often higher quality than capture stream.
@@ -87,27 +90,51 @@ namespace GitHub.secile.Video
         public Action StillImageTrigger { get; private set; } = () => { }; // null guard.
 
         /// <summary>called when still image captured by hardware button or software trigger.</summary>
+        /// <remarks>called by worker thread.</remarks>
         public Action<Bitmap> StillImageCaptured
         {
-            get { return StillSampleGrabberCallback.Buffered; }
-            set { StillSampleGrabberCallback.Buffered = value; }
+            get { return Streams[StreamType.Still].Buffered; }
+            set { Streams[StreamType.Still].Buffered = value; }
         }
 
-        private SampleGrabberCallback StillSampleGrabberCallback;
+        /// <summary>
+        /// called when preview image captured. there is a little difference in behavior between WPF and WinForms.
+        /// in WPF, image is single instance and returns same reference for every call. image is updated internally in the library.
+        /// the image can only be used to show preview with data binding. DO NOT USE for other purpose.
+        /// in WinForms, returns different reference for every call.
+        /// </summary>
+        /// <remarks>called by worker thread. to maintain throughput on the capture pin, the preview pin drops frames as needed.</remarks>
+        public Action<Bitmap> PreviewCaptured
+        {
+            get
+            {
+                // allocate before first acccess.
+                if (Streams.ContainsKey(StreamType.Preview) == false) SetPreviewCallbackMain();
+                return Streams[StreamType.Preview].Buffered;
+            }
+            set
+            {
+                // allocate before first acccess.
+                if (Streams.ContainsKey(StreamType.Preview) == false) SetPreviewCallbackMain();
+                Streams[StreamType.Preview].Buffered = value;
+            }
+        }
+
+        private Action SetPreviewCallbackMain;
 
         private Action<IntPtr> SetPreviewControlMain;
-        private Action<Size> SetPreviewControlSizeMain;
+        private Action<Size> SetPreviewSizeMain;
 
         /// <summary>Set preview on control. Call before starts.</summary>
         /// <param name="handle">control handle.</param>
         public void SetPreviewControl(IntPtr handle, Size size)
         {
             SetPreviewControlMain(handle);
-            SetPreviewControlSizeMain(size);
+            SetPreviewSizeMain(size);
         }
 
         /// <summary>Set preview size.</summary>
-        public void SetPreviewSize(Size size) { SetPreviewControlSizeMain(size); }
+        public void SetPreviewSize(Size size) { SetPreviewSizeMain(size); }
 
         /// <summary>
         /// Get available USB camera list.
@@ -191,8 +218,20 @@ namespace GitHub.secile.Video
 
                     // fix screen tearing problem(issue #2)
                     // you can use previous method if you swap the comment line below.
-                    //GetBitmap = GetBitmapFromSampleGrabberBuffer(sample.Grabber, sample.Width, sample.Height, sample.Stride);
+
+                    /*GetBitmap += GetBitmapFromSampleGrabberBuffer(sample.Grabber, sample.Width, sample.Height, sample.Stride);
+                    Func<Bitmap> GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
+                    {
+                        var sampler = new SampleGrabberBuffer(grabber, width, height, stride);
+                        return () => sampler.GetBitmap();
+                    }*/
+
                     GetBitmap = GetBitmapFromSampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride);
+                    Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
+                    {
+                        var sampler = new SampleGrabberCallback(grabber, width, height, stride, false);
+                        return () => sampler.GetBitmap();
+                    }
                 }
             }
 
@@ -225,7 +264,7 @@ namespace GitHub.secile.Video
                     {
                         StillImageAvailable = true;
 
-                        StillSampleGrabberCallback = new SampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride);
+                        Streams[StreamType.Still] = new SampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride, false);
 
                         // To trigger the still pin, use the IAMVideoControl::SetMode method when the graph is running, as follows:
                         StillImageTrigger = () =>
@@ -267,6 +306,7 @@ namespace GitHub.secile.Video
             // * Running a full-screen DOS window.
             // Any of these events might interrupt the capture session, possibly causing data loss.
 
+            // preview by SetPreviewControl.
             var makePreviewRender = false;
             SetPreviewControlMain = (controlHandle) =>
             {
@@ -287,7 +327,8 @@ namespace GitHub.secile.Video
                 vw.put_MessageDrain(controlHandle); // receive window messages sent to the video renderer.(issue #21)
             };
 
-            SetPreviewControlSizeMain = (clientSize) =>
+            // resize by SetPreviewSize.
+            SetPreviewSizeMain = (clientSize) =>
             {
                 var vw = graph as DirectShow.IVideoWindow;
                 if (vw == null) return;
@@ -308,6 +349,19 @@ namespace GitHub.secile.Video
                 const int WS_CLIPSIBLINGS = 0x04000000; // clips child windows relative to each other when receives a WM_PAINT.
                 vw.put_WindowStyle(WS_CHILD | WS_CLIPSIBLINGS);
                 vw.SetWindowPosition((int)x, (int)y, (int)w, (int)h);
+            };
+
+            // preview by PreviewCaptured.(issue #18)
+            SetPreviewCallbackMain = () =>
+            {
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_PREVIEW);
+                if (sample != null)
+                {
+                    // release when finish.
+                    Released += () => { var i_grabber = sample.Grabber; DirectShow.ReleaseInstance(ref i_grabber); };
+
+                    Streams[StreamType.Preview] = new SampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride, true);
+                }
             };
 
             // Start, Stop, Release, the filter graph.
@@ -475,20 +529,7 @@ namespace GitHub.secile.Video
                 }
             }
         }
-        
-        private Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
-        {
-            var sampler = new SampleGrabberCallback(grabber, width, height, stride);
-            return () => sampler.GetBitmap();
-        }
 
-        /// <summary>Get Bitmap from Sample Grabber Current Buffer</summary>
-        private Func<Bitmap> GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
-        {
-            var sampler = new SampleGrabberBuffer(grabber, width, height, stride);
-            return () => sampler.GetBitmap();
-        }
-        
         private class SampleGrabberCallback : DirectShow.ISampleGrabberCB
         {
             private byte[] Buffer;
@@ -498,17 +539,11 @@ namespace GitHub.secile.Video
 
             private System.Threading.AutoResetEvent BufferedEvent;
 
-            public int Width { get; private set; }
-            public int Height { get; private set; }
-            public int Stride { get; private set; }
+            private BitmapBuilder BmpBuilder;
 
-            private BitmapBuilder BmpBuilder = new BitmapBuilder();
-
-            public SampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
+            public SampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride, bool useCache)
             {
-                this.Width = width;
-                this.Height = height;
-                this.Stride = stride;
+                this.BmpBuilder = new BitmapBuilder(width, height, stride, useCache);
 
                 // create Buffered.Invoke thread.
                 BufferedEvent = new System.Threading.AutoResetEvent(false);
@@ -526,11 +561,11 @@ namespace GitHub.secile.Video
 
             public Bitmap GetBitmap()
             {
-                if (Buffer == null) return BmpBuilder.EmptyBitmap(Width, Height);
+                if (Buffer == null) return BitmapBuilder.EmptyBitmap;
 
                 lock (BufferLock)
                 {
-                    return BmpBuilder.BufferToBitmap(Buffer, Width, Height, Stride);
+                    return BmpBuilder.BufferToBitmap(Buffer);
                 }
             }
 
@@ -574,18 +609,15 @@ namespace GitHub.secile.Video
         private class SampleGrabberBuffer
         {
             private DirectShow.ISampleGrabber Grabber;
-            private int Width, Height, Stride;
             private IntPtr BufPtr;
             private byte[] Buffer;
 
-            private BitmapBuilder BmpBuilder = new BitmapBuilder();
+            private BitmapBuilder BmpBuilder;
 
             public SampleGrabberBuffer(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
             {
                 this.Grabber = grabber;
-                this.Width = width;
-                this.Height = height;
-                this.Stride = stride;
+                this.BmpBuilder = new BitmapBuilder(width, height, stride, false);
             }
 
             public Bitmap GetBitmap()
@@ -600,7 +632,7 @@ namespace GitHub.secile.Video
                     if ((uint)ex.ErrorCode == VFW_E_WRONG_STATE)
                     {
                         // image data is not ready yet. return empty bitmap.
-                        return BmpBuilder.EmptyBitmap(Width, Height);
+                        return BitmapBuilder.EmptyBitmap;
                     }
 
                     throw;
@@ -632,7 +664,7 @@ namespace GitHub.secile.Video
                 Marshal.Copy(BufPtr, Buffer, 0, size);
 
                 // 画像を作成
-                var result = BmpBuilder.BufferToBitmap(Buffer, Width, Height, Stride);
+                var result = BmpBuilder.BufferToBitmap(Buffer);
 
                 return result;
             }
@@ -640,62 +672,120 @@ namespace GitHub.secile.Video
 
         private class BitmapBuilder
         {
+            private int Width, Height, Stride;
+
 #if USBCAMERA_WPF
-            private byte[] BufferToBitmapCache;
+            private readonly bool UseCache;
+            private readonly WriteableBitmap BmpCache;
+            private byte[] BufCache;
 
-            public Bitmap BufferToBitmap(byte[] buffer, int width, int height, int stride)
+            public BitmapBuilder(int width, int height, int stride, bool useCache)
             {
+                this.Width = width;
+                this.Height = height;
+                this.Stride = stride;
+                this.UseCache = useCache;
+
                 const double dpi = 96.0;
-                var result = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
-
-                // less GC. do not allocate memory every time. (issue #18)
-                var lenght = height * stride;
-                if (BufferToBitmapCache == null || BufferToBitmapCache.Length != lenght)
-                    BufferToBitmapCache = new byte[lenght];
-
-                // copy from last row.
-                for (int y = 0; y < height; y++)
+                if (UseCache)
                 {
-                    var src_idx = buffer.Length - (stride * (y + 1));
-                    Buffer.BlockCopy(buffer, src_idx, BufferToBitmapCache, stride * y, stride);
+                    BmpCache = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
+                }
+                else
+                {
+                    // less GC. do not allocate memory every time. (issue #18)
+                    var lenght = Height * Stride;
+                    BufCache = new byte[lenght];
                 }
 
-                result.WritePixels(new Int32Rect(0, 0, width, height), BufferToBitmapCache, stride, 0);
+                EmptyBitmap = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
+                EmptyBitmap.Freeze();
+            }
 
-                // if no Freeze(), StillImageCaptured image is not displayed in WPF.
-                result.Freeze();
+            public Bitmap BufferToBitmap(byte[] buffer)
+            {
+                if (UseCache)
+                    return BufferToBitmapOverwrite(buffer);
+                else
+                    return BufferToBitmapCreateNew(buffer);
+            }
+
+            private Bitmap BufferToBitmapOverwrite(byte[] buffer)
+            {
+                WriteableBitmap result = BmpCache;
+
+                // overwrite WritableBitmap in UI thread. (issue #18)
+                Application.Current?.Dispatcher.Invoke(() =>
+                {
+                    // [in UI thread]
+                    result.Lock();
+                    {
+                        // copy from last row.
+                        for (int y = 0; y < Height; y++)
+                        {
+                            var src_idx = buffer.Length - (Stride * (y + 1));
+                            Marshal.Copy(buffer, src_idx, IntPtr.Add(result.BackBuffer, Stride * y), Stride);
+                        }
+
+                        result.AddDirtyRect(new Int32Rect(0, 0, Width, Height));
+                    }
+                    result.Unlock();
+                });
 
                 return result;
             }
 
-            public Bitmap EmptyBitmap(int width, int height)
+            private Bitmap BufferToBitmapCreateNew(byte[] buffer)
             {
-                return new WriteableBitmap(width, height, 96.0, 96.0, PixelFormats.Bgr24, null);
+                const double dpi = 96.0;
+                var result = new WriteableBitmap(Width, Height, dpi, dpi, PixelFormats.Bgr24, null);
+
+                // copy from last row.
+                for (int y = 0; y < Height; y++)
+                {
+                    var src_idx = buffer.Length - (Stride * (y + 1));
+                    Buffer.BlockCopy(buffer, src_idx, BufCache, Stride * y, Stride);
+                }
+
+                result.WritePixels(new Int32Rect(0, 0, Width, Height), BufCache, Stride, 0);
+
+                // if no Freeze(), StillImageCaptured image is not displayed in WPF.
+                result.Freeze();
+                
+                return result;
             }
+
+            public static Bitmap EmptyBitmap { get; private set; }
 #else
-            public Bitmap BufferToBitmap(byte[] buffer, int width, int height, int stride)
+            public BitmapBuilder(int width, int height, int stride, bool dummy)
+            {
+                this.Width = width;
+                this.Height = height;
+                this.Stride = stride;
+
+                EmptyBitmap = new Bitmap(width, height);
+            }
+
+            public Bitmap BufferToBitmap(byte[] buffer)
             {
                 // in WinForms, always allocate Bitmap memory. 
-                var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                var result = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
 
                 var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
             
                 // copy from last row.
-                for (int y = 0; y < height; y++)
+                for (int y = 0; y < Height; y++)
                 {
-                    var src_idx = buffer.Length - (stride * (y + 1));
-                    var dst = IntPtr.Add(bmp_data.Scan0, stride * y);
-                    Marshal.Copy(buffer, src_idx, dst, stride);
+                    var src_idx = buffer.Length - (Stride * (y + 1));
+                    var dst = IntPtr.Add(bmp_data.Scan0, Stride * y);
+                    Marshal.Copy(buffer, src_idx, dst, Stride);
                 }
                 result.UnlockBits(bmp_data);
 
                 return result;
             }
 
-            public Bitmap EmptyBitmap(int width, int height)
-            {
-                return new Bitmap(width, height);
-            }
+            public static Bitmap EmptyBitmap { get; private set; }
 #endif
         }
 

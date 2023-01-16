@@ -37,15 +37,26 @@ namespace UsbCameraForms
             // this closing event handler make sure that the instance is not subject to garbage collection.
             this.FormClosing += (s, ev) => camera.Release(); // release when close.
 
-            // show preview on control. (works light.)
+            // to show preview, there are 3 ways.
+            // 1. use SetPreviewControl. (works light, recommended.)
             camera.SetPreviewControl(pictureBox1.Handle, pictureBox1.ClientSize);
             pictureBox1.Resize += (s, ev) => camera.SetPreviewSize(pictureBox1.ClientSize); // support resize.
 
-            // or use this conventional way. (works little heavy)
-            //var timer = new System.Timers.Timer(1000 / 30) { SynchronizingObject = this };
-            //timer.Elapsed += (s, ev) => pictureBox1.Image = camera.GetBitmap();
-            //timer.Start();
-            //this.FormClosing += (s, ev) => timer.Stop();
+            // 2. use Timer and GetBitmap().
+            /*var timer = new System.Timers.Timer(1000 / 30) { SynchronizingObject = this };
+            timer.Elapsed += (s, ev) => pictureBox1.Image = camera.GetBitmap();
+            timer.Start();
+            this.FormClosing += (s, ev) => timer.Stop();*/
+
+            // 3. subscribe PreviewCaptured.
+            /*camera.PreviewCaptured += (bmp) =>
+            {
+                // called by worker thread, you have to call cross-thread control in a thread-safe way.
+                pictureBox1.Invoke((Action)(() =>
+                {
+                    pictureBox1.Image = bmp;
+                }));
+            };*/
 
             // start.
             camera.Start();
