@@ -70,6 +70,7 @@ camera.PreviewCaptured += (bmp) =>
 ```
 
 3. use Timer and GetBitmap().  
+Use this if you modify acquired image and show it. (e.g. face detection.)  
 in WinForms, use System.Timers.Timer.  
 in WPF, use DispatcherTimer.
 ```C#
