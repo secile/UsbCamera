@@ -1,5 +1,5 @@
 # UsbCamera
-C# source code for using web camera via USB in WinForms/WPF.  
+C# source code for using usb camera and web camera in WinForms/WPF.  
 With only single CSharp source code. No external library required.
 
 # How to use
