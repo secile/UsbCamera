@@ -77,7 +77,7 @@ namespace GitHub.secile.Video
         /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
         public Func<Bitmap> GetBitmap { get; private set; }
 
-        public enum StreamType { Capture, Preview, Still }
+        private enum StreamType { Capture, Preview, Still }
         private Dictionary<StreamType, SampleGrabberCallback> Streams = new Dictionary<StreamType, SampleGrabberCallback>();
 
         /// <summary>
@@ -148,11 +148,22 @@ namespace GitHub.secile.Video
         /// <summary>
         /// Get video formats.
         /// </summary>
+        /// <returns>returns supported video formats, or if the supported format is unknown, returns VideoFormat.Default.</returns>
         public static VideoFormat[] GetVideoFormat(int cameraIndex)
         {
             var filter = DirectShow.CreateFilter(DirectShow.DsGuid.CLSID_VideoInputDeviceCategory, cameraIndex);
             var pin = DirectShow.FindPin(filter, 0, DirectShow.PIN_DIRECTION.PINDIR_OUTPUT);
-            return GetVideoOutputFormat(pin);
+
+            try
+            {
+                // support the device that has no IAMStreamConfig interface.(issue #25)
+                return GetVideoOutputFormat(pin);
+            }
+            catch (Exception)
+            {
+                // can't get video format. maybe no IAMStreamConfig interface.
+                return new[] { VideoFormat.Default };
+            }
         }
 
         /// <summary>
@@ -826,7 +837,13 @@ namespace GitHub.secile.Video
         {
             var filter = DirectShow.CreateFilter(DirectShow.DsGuid.CLSID_VideoInputDeviceCategory, index);
             var pin = DirectShow.FindPin(filter, 0, DirectShow.PIN_DIRECTION.PINDIR_OUTPUT);
-            SetVideoOutputFormat(pin, format);
+
+            // support the device that has no IAMStreamConfig interface.(issue #25)
+            if (format != VideoFormat.Default)
+            {
+                SetVideoOutputFormat(pin, format);
+            }
+
             return filter;
         }
 
@@ -1084,8 +1101,15 @@ namespace GitHub.secile.Video
             public long TimePerFrame { get; set; } // ビデオフレームの平均表示時間を100ナノ秒単位で。30fpsのとき「333333」
             public DirectShow.VIDEO_STREAM_CONFIG_CAPS Caps { get; set; }
 
+            public static readonly VideoFormat Default = new VideoFormat();
+
             public override string ToString()
             {
+                if (this == Default)
+                {
+                    return "Default Video Format";
+                }
+
                 return string.Format("{0}, {1}, {2}, {3}, {4}", MajorType, SubType, Size, TimePerFrame, CapsString());
             }
 
