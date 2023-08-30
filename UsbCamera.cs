@@ -10,6 +10,9 @@ using System.Windows;               // Size
 using System.Windows.Media;         // PixelFormats
 using System.Windows.Media.Imaging; // BitmapSource
 using Bitmap = System.Windows.Media.Imaging.BitmapSource;
+#elif USBCAMERA_BYTEARRAY
+using Bitmap = System.Collections.Generic.IEnumerable<byte>;
+using System.Drawing;
 #else
 using System.Drawing;
 #endif
@@ -684,6 +687,7 @@ namespace GitHub.secile.Video
         private class BitmapBuilder
         {
             private int Width, Height, Stride;
+            public static Bitmap EmptyBitmap { get; private set; }
 
 #if USBCAMERA_WPF
             private readonly bool UseCache;
@@ -766,7 +770,31 @@ namespace GitHub.secile.Video
                 return result;
             }
 
-            public static Bitmap EmptyBitmap { get; private set; }
+#elif USBCAMERA_BYTEARRAY
+            public BitmapBuilder(int width, int height, int stride, bool dummy)
+            {
+                this.Width = width;
+                this.Height = height;
+                this.Stride = stride;
+
+                EmptyBitmap = new byte[0];
+            }
+
+            public Bitmap BufferToBitmap(byte[] buffer)
+            {
+                var result = new byte[Width * Height * 3];
+
+                // copy from last row.
+                for (int y = 0; y < Height; y++)
+                {
+                    var src_idx = buffer.Length - (Stride * (y + 1));
+                    var dst = Stride * y;
+                    Buffer.BlockCopy(buffer, src_idx, result, dst, Stride);
+                }
+
+                return result;
+            }
+
 #else
             public BitmapBuilder(int width, int height, int stride, bool dummy)
             {
@@ -795,8 +823,6 @@ namespace GitHub.secile.Video
 
                 return result;
             }
-
-            public static Bitmap EmptyBitmap { get; private set; }
 #endif
         }
 
@@ -1128,7 +1154,7 @@ namespace GitHub.secile.Video
 
     static class DirectShow
     {
-        #region Function
+#region Function
 
         /// <summary>COMオブジェクトのインスタンスを作成する。</summary>
         public static object CoCreateInstance(Guid clsid)
@@ -1398,10 +1424,10 @@ namespace GitHub.secile.Video
             mt = null;
         }
 
-        #endregion
+#endregion
 
 
-        #region Interface
+#region Interface
 
         [ComVisible(true), ComImport(), Guid("56a8689f-0ad4-11ce-b03a-0020af0ba770"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
         public interface IFilterGraph
@@ -1704,10 +1730,10 @@ namespace GitHub.secile.Video
             int IsCursorHidden(ref int hideCursor);
         }
 
-        #endregion
+#endregion
 
 
-        #region Structure
+#region Structure
 
         [Serializable]
         [StructLayout(LayoutKind.Sequential), ComVisible(false)]
@@ -1852,10 +1878,10 @@ namespace GitHub.secile.Video
             public int Bottom;
             public override string ToString() { return string.Format("{{{0}, {1}, {2}, {3}}}", Left, Top, Right, Bottom); } // for debugging.
         }
-        #endregion
+#endregion
 
 
-        #region Enum
+#region Enum
 
         [ComVisible(false)]
         public enum PIN_DIRECTION
@@ -1921,10 +1947,10 @@ namespace GitHub.secile.Video
             ExternalTriggerEnable = 0x04,
             Trigger = 0x08
         }
-        #endregion
+#endregion
 
 
-        #region Guid
+#region Guid
 
         public static class DsGuid
         {
@@ -2018,6 +2044,6 @@ namespace GitHub.secile.Video
                 return guid.ToString();
             }
         }
-        #endregion
+#endregion
     }
 }
