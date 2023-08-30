@@ -47,6 +47,30 @@ By default, GetBitmap() returns image of System.Drawing.Bitmap.
 In WPF, define 'USBCAMERA_WPF' symbol that makes GetBitmap() returns image of BitmapSource.
 <img src="https://user-images.githubusercontent.com/29785639/142785991-c1f42bd1-6bea-459b-99c7-a0c8c175ce1e.png" width="360">
 
+# Get image data as byte array (Experimental)
+If 'USBCAMERA_BYTEARRAY' symbol defined, GetBitmap() returns image data as byte array.  
+This is intended to be used with machine learning.  
+GetBitmap function returns IEnumerable\<byte\> as a signature, but it actually returns byte array.  
+So, please cast it to 'byte[]' before use.
+
+```cs
+button1.Click += (s, ev) =>
+{
+    var buf = (byte[])camera.GetBitmap(); // cast to byte[] before use.
+    var bmp = BufferToBitmap(buf, camera.Size.Width, camera.Size.Height);
+    pictureBox2.Image = bmp;
+};
+
+private static Bitmap BufferToBitmap(byte[] buffer, int width, int height)
+{
+    var result = new Bitmap(width, height);
+    var bmpData = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+    System.Runtime.InteropServices.Marshal.Copy(buffer, 0, bmpData.Scan0, buffer.Length);
+    result.UnlockBits(bmpData);
+    return result;
+}
+```
+
 # Show preview.
 There are 3 ways to show preview.
 
