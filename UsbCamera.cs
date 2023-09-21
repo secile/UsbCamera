@@ -1,3 +1,10 @@
+/*
+ * UsbCamera.cs
+ * Copyright (c) 2019 secile
+ * This software is released under the MIT license.
+ * see https://opensource.org/licenses/MIT
+ */
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
