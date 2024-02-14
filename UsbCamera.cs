@@ -582,7 +582,7 @@ namespace GitHub.secile.Video
 
             public Bitmap GetBitmap()
             {
-                if (Buffer == null) return BitmapBuilder.EmptyBitmap;
+                if (Buffer == null) return BmpBuilder.EmptyBitmap;
 
                 lock (BufferLock)
                 {
@@ -653,7 +653,7 @@ namespace GitHub.secile.Video
                     if ((uint)ex.ErrorCode == VFW_E_WRONG_STATE)
                     {
                         // image data is not ready yet. return empty bitmap.
-                        return BitmapBuilder.EmptyBitmap;
+                        return BmpBuilder.EmptyBitmap;
                     }
 
                     throw;
@@ -694,12 +694,25 @@ namespace GitHub.secile.Video
         private class BitmapBuilder
         {
             private int Width, Height, Stride;
-            public static Bitmap EmptyBitmap { get; private set; }
 
 #if USBCAMERA_WPF
+
             private readonly bool UseCache;
             private readonly WriteableBitmap BmpCache;
             private byte[] BufCache;
+
+            private const double dpi = 96.0;
+
+            //  EmptyBitmap returns new instance. (issue #34)
+            public Bitmap EmptyBitmap
+            {
+                get
+                {
+                    var bmp = new WriteableBitmap(Width, Height, dpi, dpi, PixelFormats.Bgr24, null);
+                    bmp.Freeze();
+                    return bmp;
+                }
+            }
 
             public BitmapBuilder(int width, int height, int stride, bool useCache)
             {
@@ -708,7 +721,6 @@ namespace GitHub.secile.Video
                 this.Stride = stride;
                 this.UseCache = useCache;
 
-                const double dpi = 96.0;
                 if (UseCache)
                 {
                     BmpCache = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
@@ -719,9 +731,6 @@ namespace GitHub.secile.Video
                     var lenght = Height * Stride;
                     BufCache = new byte[lenght];
                 }
-
-                EmptyBitmap = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
-                EmptyBitmap.Freeze();
             }
 
             public Bitmap BufferToBitmap(byte[] buffer)
@@ -759,7 +768,6 @@ namespace GitHub.secile.Video
 
             private Bitmap BufferToBitmapCreateNew(byte[] buffer)
             {
-                const double dpi = 96.0;
                 var result = new WriteableBitmap(Width, Height, dpi, dpi, PixelFormats.Bgr24, null);
 
                 // copy from last row.
@@ -778,13 +786,17 @@ namespace GitHub.secile.Video
             }
 
 #elif USBCAMERA_BYTEARRAY
+            //  EmptyBitmap returns new instance. (issue #34)
+            public Bitmap EmptyBitmap
+            {
+                get { return new byte[0]; }
+            }
+
             public BitmapBuilder(int width, int height, int stride, bool dummy)
             {
                 this.Width = width;
                 this.Height = height;
                 this.Stride = stride;
-
-                EmptyBitmap = new byte[0];
             }
 
             public Bitmap BufferToBitmap(byte[] buffer)
@@ -803,13 +815,17 @@ namespace GitHub.secile.Video
             }
 
 #else
+            //  EmptyBitmap returns new instance. (issue #34)
+            public Bitmap EmptyBitmap
+            {
+                get { return new Bitmap(Width, Height); }
+            }
+
             public BitmapBuilder(int width, int height, int stride, bool dummy)
             {
                 this.Width = width;
                 this.Height = height;
                 this.Stride = stride;
-
-                EmptyBitmap = new Bitmap(width, height);
             }
 
             public Bitmap BufferToBitmap(byte[] buffer)
@@ -818,7 +834,7 @@ namespace GitHub.secile.Video
                 var result = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
 
                 var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-            
+
                 // copy from last row.
                 for (int y = 0; y < Height; y++)
                 {
