@@ -568,7 +568,9 @@ namespace GitHub.secile.Video
 
                 // create Buffered.Invoke thread.
                 BufferedEvent = new System.Threading.AutoResetEvent(false);
-                System.Threading.ThreadPool.QueueUserWorkItem(x =>
+
+                // use new Thread instead of ThreadPool. (issue #30)
+                var thread = new System.Threading.Thread(x =>
                 {
                     while (true)
                     {
@@ -576,6 +578,8 @@ namespace GitHub.secile.Video
                         Buffered?.Invoke(GetBitmap()); // fire!
                     }
                 });
+                thread.IsBackground = true;
+                thread.Start();
 
                 grabber.SetCallback(this, 1); // WhichMethodToCallback = BufferCB
             }
