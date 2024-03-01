@@ -54,7 +54,11 @@ namespace UsbCameraForms
                 // called by worker thread, you have to call cross-thread control in a thread-safe way.
                 pictureBox1.Invoke((Action)(() =>
                 {
+                    // basically, bitmap object is disposed automatically by GC.
+                    // but in case exception occurs because of out-of-memory, you have to dispose bitmap by yourself.
+                    var oldImage = pictureBox1.Image;
                     pictureBox1.Image = bmp;
+                    oldImage?.Dispose();
                 }));
             };*/
 

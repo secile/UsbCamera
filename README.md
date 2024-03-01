@@ -104,6 +104,12 @@ timer.Start();
 this.FormClosing += (s, ev) => timer.Stop();
 ```
 
+### Note
+Allocating bitmap so high frequency, esspecially large bitmap, can lead to exceptions bacause of out-of-memory.
+Basically, bitmap object is disposed automatically by GC, so it is not occur in normal situation.  
+In my environment, using VideoFormat that image size is larger than 1920×1080 cause exception.
+In case of the situation, you have to dispose bitmap by yourself.
+
 # Still image capture.
 Some cameras can produce a still image separate from the capture stream,  
 and often the still image is of higher quality than the images produced by the capture stream.  
