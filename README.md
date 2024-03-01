@@ -110,6 +110,17 @@ Basically, bitmap object is disposed automatically by GC, so it is not occur in 
 In my environment, using VideoFormat that image size is larger than 1920×1080 cause exception.
 In case of the situation, you have to dispose bitmap by yourself.
 
+```cs
+var timer = new System.Timers.Timer(1000 / 30) { SynchronizingObject = this };
+timer.Elapsed += (s, ev) =>
+{
+    var oldImage = pictureBox1.Image;
+    pictureBox1.Image = camera.GetBitmap();
+    oldImage?.Dispose();
+};
+timer.Start();
+```
+
 # Still image capture.
 Some cameras can produce a still image separate from the capture stream,  
 and often the still image is of higher quality than the images produced by the capture stream.  
