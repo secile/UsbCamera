@@ -17,8 +17,7 @@ namespace UsbCameraWpf
             get { return _Preview; }
             set
             {
-                if (_Preview != value)
-                    _Preview = value;
+                _Preview = value;
                 OnPropertyChanged();
             }
         }
@@ -61,7 +60,10 @@ namespace UsbCameraWpf
             {
                 // passed image can only be used for preview with data binding.
                 // the image is single instance and updated by library. DO NOT USE for other purpose.
-                Preview = bmp;
+                if (!ReferenceEquals(Preview, bmp))
+                {
+                    Preview = bmp;
+                }
             };
 
             // 2. use Timer and GetBitmap().
