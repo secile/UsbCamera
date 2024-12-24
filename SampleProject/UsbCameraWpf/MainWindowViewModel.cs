@@ -49,7 +49,7 @@ namespace UsbCameraWpf
             var formats = UsbCamera.GetVideoFormat(cameraIndex);
 
             // select the format you want.
-            foreach (var item in formats) Console.WriteLine(item);
+            for (int i = 0; i < formats.Length; i++) Console.WriteLine("{0}:{1}", i, formats[i]);
             var format = formats[0];
 
             // create instance.
