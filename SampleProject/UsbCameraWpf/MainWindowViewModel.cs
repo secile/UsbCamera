@@ -15,23 +15,14 @@ namespace UsbCameraWpf
         public BitmapSource Preview
         {
             get { return _Preview; }
-            set
-            {
-                if (_Preview != value)
-                    _Preview = value;
-                OnPropertyChanged();
-            }
+            set { RaiseAndSetIfChanged(ref _Preview, value); }
         }
 
         private BitmapSource _Capture;
         public BitmapSource Capture
         {
             get { return _Capture; }
-            set
-            {
-                _Capture = value;
-                OnPropertyChanged();
-            }
+            set { RaiseAndSetIfChanged(ref _Capture, value); }
         }
 
         public ICommand GetBitmap { get; private set; }
