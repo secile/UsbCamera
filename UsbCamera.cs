@@ -1152,7 +1152,7 @@ namespace GitHub.secile.Video
             public string SubType { get; set; }    // [YUY2], [MJPG]など
             public Size Size { get; set; }         // ビデオサイズ
             public long TimePerFrame { get; set; } // ビデオフレームの平均表示時間を100ナノ秒単位で。30fpsのとき「333333」
-            public int Fps { get { return (int)(10000000 / TimePerFrame); } } // <- modified this line.
+            public int Fps { get { return (int)(10000000 / TimePerFrame); } }
             public DirectShow.VIDEO_STREAM_CONFIG_CAPS Caps { get; set; }
 
             public static readonly VideoFormat Default = new VideoFormat();
@@ -1164,7 +1164,7 @@ namespace GitHub.secile.Video
                     return "Default Video Format";
                 }
 
-                return string.Format("{0}, {1}, {2}, {3}, {4}fps, {5}", MajorType, SubType, Size, TimePerFrame, Fps, CapsString()); // <- modified this line.
+                return string.Format("{0}, {1}, {2}, {3}, {4}fps, {5}", MajorType, SubType, Size, TimePerFrame, Fps, CapsString());
             }
 
             private string CapsString()
