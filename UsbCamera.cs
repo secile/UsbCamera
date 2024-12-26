@@ -39,9 +39,10 @@ namespace GitHub.secile.Video
     // var camera = new UsbCamera(cameraIndex, formats[0]);
     // camera.Start();
     //
+    // just after camera start, GetBitmap() will fail because image buffer is not ready.
+    // while (!camera.IsReady) System.Threading.Thread.Sleep(10);
+    //
     // get image.
-    // Immediately after starting the USB camera,
-    // GetBitmap() fails because image buffer is not prepared yet.
     // var bmp = camera.GetBitmap();
     //
     // adjust properties.
@@ -82,6 +83,10 @@ namespace GitHub.secile.Video
 
         private Action Releasing;
         private Action Released;
+
+        /// <summary>true if image buffer is ready and you can get bitmap.</summary>
+        /// <remarks>issue #38</remarks>
+        public bool IsReady { get { return Streams[StreamType.Capture].IsReady; } }
 
         /// <summary>Get image.</summary>
         /// <remarks>Immediately after starting, fails because image buffer is not prepared yet.</remarks>
@@ -239,8 +244,9 @@ namespace GitHub.secile.Video
 
                     // fix screen tearing problem(issue #2)
                     // you can use previous method if you swap the comment line below.
+                    // when you use previous method, you can not use IsReady property.(added in issue #38)
 
-                    /*GetBitmap += GetBitmapFromSampleGrabberBuffer(sample.Grabber, sample.Width, sample.Height, sample.Stride);
+                    /*GetBitmap = GetBitmapFromSampleGrabberBuffer(sample.Grabber, sample.Width, sample.Height, sample.Stride);
                     Func<Bitmap> GetBitmapFromSampleGrabberBuffer(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
                     {
                         var sampler = new SampleGrabberBuffer(grabber, width, height, stride);
@@ -250,8 +256,8 @@ namespace GitHub.secile.Video
                     GetBitmap = GetBitmapFromSampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride);
                     Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
                     {
-                        var sampler = new SampleGrabberCallback(grabber, width, height, stride, false);
-                        return () => sampler.GetBitmap();
+                        Streams[StreamType.Capture] = new SampleGrabberCallback(grabber, width, height, stride, false);
+                        return () => Streams[StreamType.Capture].GetBitmap();
                     }
                 }
             }
@@ -561,6 +567,8 @@ namespace GitHub.secile.Video
             private System.Threading.AutoResetEvent BufferedEvent;
 
             private BitmapBuilder BmpBuilder;
+
+            public bool IsReady { get { return Buffer != null; } }
 
             public SampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride, bool useCache)
             {
