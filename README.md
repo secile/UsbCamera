@@ -158,6 +158,10 @@ if (prop.Available && prop.CanAuto)
 }
 ```
 
+# Gray scale camera supports. (need your help)
+Currently, some gray scale camera that buffer type is Y800, Y8 or Y16 may not work fine.
+If you have the camera and have trouble, please join issue [#46](https://github.com/secile/UsbCamera/issues/46).
+
 # Special Thanks.
 This project make use of a part of source code of the project below. Thank you!   
 * DShowLib (author: Mr. M.Oshikiri)  
