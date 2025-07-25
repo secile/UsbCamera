@@ -257,6 +257,10 @@ namespace GitHub.secile.Video
                     Func<Bitmap> GetBitmapFromSampleGrabberCallback(DirectShow.ISampleGrabber grabber, int width, int height, int stride)
                     {
                         Streams[StreamType.Capture] = new SampleGrabberCallback(grabber, width, height, stride, false);
+
+                        // release SampleGrabberCallback. (issue #49)
+                        Releasing += () => Streams[StreamType.Capture].Release();
+
                         return () => Streams[StreamType.Capture].GetBitmap();
                     }
                 }
@@ -292,6 +296,9 @@ namespace GitHub.secile.Video
                         StillImageAvailable = true;
 
                         Streams[StreamType.Still] = new SampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride, false);
+
+                        // release SampleGrabberCallback. (issue #49)
+                        Releasing += () => Streams[StreamType.Still].Release();
 
                         // To trigger the still pin, use the IAMVideoControl::SetMode method when the graph is running, as follows:
                         StillImageTrigger = () =>
@@ -388,6 +395,9 @@ namespace GitHub.secile.Video
                     Released += () => { var i_grabber = sample.Grabber; DirectShow.ReleaseInstance(ref i_grabber); };
 
                     Streams[StreamType.Preview] = new SampleGrabberCallback(sample.Grabber, sample.Width, sample.Height, sample.Stride, true);
+
+                    // release SampleGrabberCallback. (issue #49)
+                    Releasing += () => Streams[StreamType.Preview].Release();
                 }
             };
 
@@ -580,16 +590,28 @@ namespace GitHub.secile.Video
                 // use new Thread instead of ThreadPool. (issue #30)
                 var thread = new System.Threading.Thread(x =>
                 {
-                    while (true)
+                    ThreadActive = true;
+                    BufferedEvent.WaitOne(); // wait event.
+
+                    while (ThreadActive)
                     {
-                        BufferedEvent.WaitOne(); // wait event.
                         Buffered?.Invoke(GetBitmap()); // fire!
+                        BufferedEvent.WaitOne(); // wait next event.
                     }
                 });
                 thread.IsBackground = true;
                 thread.Start();
 
                 grabber.SetCallback(this, 1); // WhichMethodToCallback = BufferCB
+            }
+
+            private volatile bool ThreadActive;
+
+            /// <remarks>release SampleGrabberCallback. (issue #49)</remarks>
+            public void Release()
+            {
+                ThreadActive = false;
+                BufferedEvent.Set();
             }
 
             public Bitmap GetBitmap()
