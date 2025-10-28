@@ -16,12 +16,16 @@ using System.Runtime.InteropServices.ComTypes;
 using System.Windows;               // Size
 using System.Windows.Media;         // PixelFormats
 using System.Windows.Media.Imaging; // BitmapSource
-using Bitmap = System.Windows.Media.Imaging.BitmapSource;
-#elif USBCAMERA_BYTEARRAY
-using Bitmap = System.Collections.Generic.IEnumerable<byte>;
-using System.Drawing;
 #else
 using System.Drawing;
+#endif
+
+#if USBCAMERA_BYTEARRAY
+using Bitmap = System.Collections.Generic.IEnumerable<byte>;
+#elif USBCAMERA_WPF
+using Bitmap = System.Windows.Media.Imaging.BitmapSource;
+#else
+//using Bitmap = System.Drawing.Bitmap;
 #endif
 
 namespace GitHub.secile.Video
@@ -737,9 +741,28 @@ namespace GitHub.secile.Video
         {
             private int Width, Height, Stride;
 
-#if USBCAMERA_WPF
+#if USBCAMERA_BYTEARRAY
+            //  EmptyBitmap returns new instance. (issue #34)
+            public Bitmap EmptyBitmap
+            {
+                get { return new byte[Height * Stride]; }
+            }
 
-            private readonly bool UseCache;
+            public BitmapBuilder(int width, int height, int stride, bool dummy)
+            {
+                this.Width = width;
+                this.Height = height;
+                this.Stride = stride;
+            }
+
+            public Bitmap BufferToBitmap(byte[] buffer)
+            {
+                var result = new byte[buffer.Length];
+                Buffer.BlockCopy(buffer, 0, result, 0, result.Length);
+                return result;
+            }
+
+#elif USBCAMERA_WPF
             private readonly WriteableBitmap BmpCache;
             private byte[] BufCache;
 
@@ -761,26 +784,35 @@ namespace GitHub.secile.Video
                 this.Width = width;
                 this.Height = height;
                 this.Stride = stride;
-                this.UseCache = useCache;
 
-                if (UseCache)
+                // less GC. do not allocate memory every time. (issue #18)
+                if (useCache)
                 {
+                    // overwrite with BmpCache.
                     BmpCache = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
+                    BufCache = null;
                 }
                 else
                 {
-                    // less GC. do not allocate memory every time. (issue #18)
-                    var lenght = Height * Stride;
-                    BufCache = new byte[lenght];
+                    // createnew with BufCache.
+                    BmpCache = null;
+                    BufCache = new byte[Height * Width * 3]; // Bgr24 is 3 byte per pixel.
                 }
             }
 
             public Bitmap BufferToBitmap(byte[] buffer)
             {
-                if (UseCache)
+                // if (useCache)
+                if (BmpCache != null)
+                {
+                    // overwrite with BmpCache.
                     return BufferToBitmapOverwrite(buffer);
+                }
                 else
+                {
+                    // createnew with BufCache.
                     return BufferToBitmapCreateNew(buffer);
+                }
             }
 
             private Bitmap BufferToBitmapOverwrite(byte[] buffer)
@@ -797,7 +829,8 @@ namespace GitHub.secile.Video
                         for (int y = 0; y < Height; y++)
                         {
                             var src_idx = buffer.Length - (Stride * (y + 1));
-                            Marshal.Copy(buffer, src_idx, IntPtr.Add(result.BackBuffer, Stride * y), Stride);
+                            var dst_ptr = IntPtr.Add(result.BackBuffer, result.BackBufferStride * y);
+                            Marshal.Copy(buffer, src_idx, dst_ptr, Stride);
                         }
 
                         result.AddDirtyRect(new Int32Rect(0, 0, Width, Height));
@@ -807,7 +840,7 @@ namespace GitHub.secile.Video
 
                 return result;
             }
-
+            
             private Bitmap BufferToBitmapCreateNew(byte[] buffer)
             {
                 var result = new WriteableBitmap(Width, Height, dpi, dpi, PixelFormats.Bgr24, null);
@@ -816,43 +849,15 @@ namespace GitHub.secile.Video
                 for (int y = 0; y < Height; y++)
                 {
                     var src_idx = buffer.Length - (Stride * (y + 1));
-                    Buffer.BlockCopy(buffer, src_idx, BufCache, Stride * y, Stride);
+                    var dst = result.BackBufferStride * y;
+                    Buffer.BlockCopy(buffer, src_idx, BufCache, dst, Stride);
                 }
 
-                result.WritePixels(new Int32Rect(0, 0, Width, Height), BufCache, Stride, 0);
+                result.WritePixels(new Int32Rect(0, 0, Width, Height), BufCache, result.BackBufferStride, 0);
 
                 // if no Freeze(), StillImageCaptured image is not displayed in WPF.
                 result.Freeze();
                 
-                return result;
-            }
-
-#elif USBCAMERA_BYTEARRAY
-            //  EmptyBitmap returns new instance. (issue #34)
-            public Bitmap EmptyBitmap
-            {
-                get { return new byte[0]; }
-            }
-
-            public BitmapBuilder(int width, int height, int stride, bool dummy)
-            {
-                this.Width = width;
-                this.Height = height;
-                this.Stride = stride;
-            }
-
-            public Bitmap BufferToBitmap(byte[] buffer)
-            {
-                var result = new byte[Width * Height * 3];
-
-                // copy from last row.
-                for (int y = 0; y < Height; y++)
-                {
-                    var src_idx = buffer.Length - (Stride * (y + 1));
-                    var dst = Stride * y;
-                    Buffer.BlockCopy(buffer, src_idx, result, dst, Stride);
-                }
-
                 return result;
             }
 
@@ -872,23 +877,348 @@ namespace GitHub.secile.Video
 
             public Bitmap BufferToBitmap(byte[] buffer)
             {
-                // in WinForms, always allocate Bitmap memory. 
-                var result = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-
-                var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
-
-                // copy from last row.
-                for (int y = 0; y < Height; y++)
-                {
-                    var src_idx = buffer.Length - (Stride * (y + 1));
-                    var dst = IntPtr.Add(bmp_data.Scan0, Stride * y);
-                    Marshal.Copy(buffer, src_idx, dst, Stride);
-                }
-                result.UnlockBits(bmp_data);
-
-                return result;
+                return UsbCamera.ByteArrayUtility.RGB24.CreateBitmap(buffer, this.Width, this.Height);
             }
 #endif
+        }
+
+
+        public static class ByteArrayUtility
+        {
+            public static class RGB24
+            {
+
+#if USBCAMERA_WPF
+                /// <summary>create Bitmap from buffer.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <returns>created BitmapSource.</returns>
+                public static BitmapSource CreateBitmap(byte[] buffer, int width, int height)
+                {
+                    const double dpi = 96.0;
+                    int stride = width * 3;  // Bgr24 is 3 byte per pixel.
+                    var result = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
+                    var bmp_data = new byte[height * stride];
+
+                    // copy from last row.
+                    for (int y = 0; y < height; y++)
+                    {
+                        var src_idx = buffer.Length - (stride * (y + 1));
+                        var dst = result.BackBufferStride * y;
+                        Buffer.BlockCopy(buffer, src_idx, bmp_data, dst, stride);
+                    }
+
+                    result.WritePixels(new Int32Rect(0, 0, width, height), bmp_data, result.BackBufferStride, 0);
+
+                    // if no Freeze(), StillImageCaptured image is not displayed in WPF.
+                    result.Freeze();
+
+                    return result;
+                }
+#else
+                /// <summary>create Bitmap from buffer.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <returns>created Bitmap.</returns>
+                public static System.Drawing.Bitmap CreateBitmap(byte[] buffer, int width, int height)
+                {
+                    int stride = width * 3;  // Format24bppRgb is 3 byte per pixel.
+                    var result = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+                    // copy from last row.
+                    for (int y = 0; y < height; y++)
+                    {
+                        var src_idx = buffer.Length - (stride * (y + 1));
+                        var dst = IntPtr.Add(bmp_data.Scan0, bmp_data.Stride * y);
+                        Marshal.Copy(buffer, src_idx, dst, stride);
+                    }
+                    result.UnlockBits(bmp_data);
+
+                    return result;
+                }
+#endif
+
+                /// <summary>get the luminance value of the specified coordinates.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <param name="x">x position.</param>
+                /// <param name="y">y position.</param>
+                /// <returns>luminance value.</returns>
+                public static int GetValue(byte[] buffer, int width, int height, int x, int y)
+                {
+                    int stride = width * 3;
+                    int bufptr = buffer.Length - (stride * (y + 1));
+                    byte b = buffer[bufptr + (x * 3) + 0];
+                    byte g = buffer[bufptr + (x * 3) + 1];
+                    byte r = buffer[bufptr + (x * 3) + 2];
+                    var result = (r << 16) + (g << 8) + b;
+                    return result;
+                }
+
+                /// <summary>set the luminance value to the specified coordinates.</summary>
+                public static void SetValue(byte[] buffer, int width, int height, int x, int y, int value)
+                {
+                    int stride = width * 3;
+                    int bufptr = buffer.Length - (stride * (y + 1));
+                    byte b = (byte)((value >> 0) & 0xFF);
+                    byte g = (byte)((value >> 8) & 0xFF);
+                    byte r = (byte)((value >> 16) & 0xFF);
+                    buffer[bufptr + (x * 3) + 0] = b;
+                    buffer[bufptr + (x * 3) + 1] = g;
+                    buffer[bufptr + (x * 3) + 2] = r;
+                }
+            }
+
+
+            /// <summary>
+            /// The Y800 is an 8-bit, monochrome format. Every pixel is represented by a single byte.
+            /// The pixels in the image buffer are organized from left to right and from top to bottom.
+            /// </summary>
+            public static class Y800
+            {
+
+#if USBCAMERA_WPF
+                /// <summary>create Bitmap from buffer.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <returns>created BitmapSource.</returns>
+                public static BitmapSource CreateBitmap(byte[] buffer, int width, int height)
+                {
+                    const double dpi = 96.0;
+                    var result = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
+                    var bmp_data = new byte[height * width * 3]; // Bgr24 is 3 byte per pixel.
+
+                    // copy from first row.
+                    int cnt = 0;
+                    for (int y = 0; y < height; y++)
+                    {
+                        var dst_idx = y * result.BackBufferStride;
+                        for (int x = 0; x < width; x++)
+                        {
+                            bmp_data[dst_idx++] = buffer[cnt]; // b
+                            bmp_data[dst_idx++] = buffer[cnt]; // g
+                            bmp_data[dst_idx++] = buffer[cnt]; // r
+                            cnt++;
+                        }
+                    }
+
+                    result.WritePixels(new Int32Rect(0, 0, width, height), bmp_data, result.BackBufferStride, 0);
+
+                    // if no Freeze(), StillImageCaptured image is not displayed in WPF.
+                    result.Freeze();
+
+                    return result;
+                }
+
+#else
+                /// <summary>create Bitmap from buffer.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <returns>created Bitmap.</returns>
+                public static System.Drawing.Bitmap CreateBitmap(byte[] buffer, int width, int height)
+                {
+                    var result = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+                    var bmp_buffer = new byte[bmp_data.Stride * height];
+
+                    // copy from first row.
+                    int cnt = 0;
+                    for (int y = 0; y < height; y++)
+                    {
+                        int dst_idx = y * bmp_data.Stride;
+                        for (int x = 0; x < width; x++)
+                        {
+                            bmp_buffer[dst_idx++] = buffer[cnt]; // b
+                            bmp_buffer[dst_idx++] = buffer[cnt]; // g
+                            bmp_buffer[dst_idx++] = buffer[cnt]; // r
+                            cnt++;
+                        }
+                    }
+
+                    Marshal.Copy(bmp_buffer, 0, bmp_data.Scan0, bmp_buffer.Length);
+                    result.UnlockBits(bmp_data);
+
+                    return result;
+                }
+#endif
+
+                /// <summary>get the luminance value of the specified coordinates.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <param name="x">x position.</param>
+                /// <param name="y">y position.</param>
+                /// <returns>luminance value.</returns>
+                public static byte GetValue(byte[] buffer, int width, int height, int x, int y)
+                {
+                    int stride = width * 1;
+                    int bufptr = stride * y;
+                    var result = buffer[bufptr + x];
+                    return result;
+                }
+
+                /// <summary>set the luminance value to the specified coordinates.</summary>
+                public static void SetValue(byte[] buffer, int width, int height, int x, int y, byte value)
+                {
+                    int stride = width * 1;
+                    int bufptr = stride * y;
+                    buffer[bufptr + x] = value;
+                }
+            }
+
+            /// <summary>
+            /// Y16 is a 16-bit grayscale format. Every pixel is an unsigned 16-bit integer value stored in little-endian.
+            /// The pixels in the image buffer are organized from left to right and from top to bottom.
+            /// </summary>
+            public static class Y16
+            {
+
+#if USBCAMERA_WPF
+                /// <summary>create BitmapSource from buffer.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="bits">bit depth of Y16. normally, specify 8, 10, or 12.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <returns>created BitmapSource.</returns>
+                public static BitmapSource CreateBitmap(byte[] buffer, int bits, int width, int height)
+                {
+                    //             [HI BYTE] [LO BYTE]
+                    // ADC 08bit : 1111 1111 xxxx xxxx : max=255,  pad=8.
+                    // ADC 10bit : 1111 1111 11xx xxxx : max=1023, pad=6.
+                    // ADC 12bit : 1111 1111 1111 xxxx : max=4095, pad=4.
+                    int max = (0x01 << bits) - 1;
+                    int pad = 16 - bits;
+
+                    const double dpi = 96.0;
+                    var result = new WriteableBitmap(width, height, dpi, dpi, PixelFormats.Bgr24, null);
+                    var bmp_data = new byte[height * width * 3]; // Bgr24 is 3 byte per pixel.
+
+                    // copy from first row.
+                    int cnt = 0;
+                    for (int y = 0; y < height; y++)
+                    {
+                        var dst_idx = y * result.BackBufferStride;
+                        for (int x = 0; x < width; x++)
+                        {
+                            var lo = buffer[cnt + 0];
+                            var hi = buffer[cnt + 1];
+                            var w = (ushort)(((hi << 8) + lo) >> pad);
+                            var b = (byte)(w * byte.MaxValue / max);
+
+                            // set same value to b,g,r.
+                            bmp_data[dst_idx++] = b; // b
+                            bmp_data[dst_idx++] = b; // g
+                            bmp_data[dst_idx++] = b; // r
+                            cnt += 2;
+                        }
+                    }
+
+                    result.WritePixels(new Int32Rect(0, 0, width, height), bmp_data, result.BackBufferStride, 0);
+
+                    // if no Freeze(), StillImageCaptured image is not displayed in WPF.
+                    result.Freeze();
+
+                    return result;
+                }
+
+#else
+                /// <summary>create Bitmap from buffer.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="bits">bit depth of Y16. normally, specify 8, 10, or 12.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <returns>created Bitmap.</returns>
+                public static System.Drawing.Bitmap CreateBitmap(byte[] buffer, int bits, int width, int height)
+                {
+                    //             [HI BYTE] [LO BYTE]
+                    // ADC 08bit : 1111 1111 xxxx xxxx : max=255,  pad=8.
+                    // ADC 10bit : 1111 1111 11xx xxxx : max=1023, pad=6.
+                    // ADC 12bit : 1111 1111 1111 xxxx : max=4095, pad=4.
+                    int max = (0x01 << bits) - 1;
+                    int pad = 16 - bits;
+
+                    var result = new System.Drawing.Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+                    var bmp_data = result.LockBits(new Rectangle(Point.Empty, result.Size), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+                    var bmp_buffer = new byte[bmp_data.Stride * height];
+
+                    // copy from first row.
+                    int cnt = 0;
+                    for (int y = 0; y < height; y++)
+                    {
+                        int dst_idx = y * bmp_data.Stride;
+                        for (int x = 0; x < width; x++)
+                        {
+                            var lo = buffer[cnt + 0];
+                            var hi = buffer[cnt + 1];
+                            var w = (ushort)(((hi << 8) + lo) >> pad);
+                            var b = (byte)(w * byte.MaxValue / max);
+
+                            // set same value to b,g,r.
+                            bmp_buffer[dst_idx++] = b; // b
+                            bmp_buffer[dst_idx++] = b; // g
+                            bmp_buffer[dst_idx++] = b; // r
+                            cnt += 2;
+                        }
+                    }
+
+                    Marshal.Copy(bmp_buffer, 0, bmp_data.Scan0, bmp_buffer.Length);
+                    result.UnlockBits(bmp_data);
+
+                    return result;
+                }
+
+#endif
+                /// <summary>get the luminance value of the specified coordinates.</summary>
+                /// <param name="buffer">data buffer.</param>
+                /// <param name="bits">bit depth of Y16. normally, specify 8, 10, or 12.</param>
+                /// <param name="width">buffer width.</param>
+                /// <param name="height">buffer height.</param>
+                /// <param name="x">x position.</param>
+                /// <param name="y">y position.</param>
+                /// <returns>luminance value.</returns>
+                public static ushort GetValue(byte[] buffer, int bits, int width, int height, int x, int y)
+                {
+                    //             [HI BYTE] [LO BYTE]
+                    // ADC 08bit : 1111 1111 xxxx xxxx : max=255,  pad=8.
+                    // ADC 10bit : 1111 1111 11xx xxxx : max=1023, pad=6.
+                    // ADC 12bit : 1111 1111 1111 xxxx : max=4095, pad=4.
+                    //int max = (0x01 << bits) - 1;
+                    int pad = 16 - bits;
+
+                    int stride = width * 2;
+                    int bufptr = stride * y;
+                    byte lo = buffer[bufptr + (x * 2) + 0];
+                    byte hi = buffer[bufptr + (x * 2) + 1];
+                    var result = (ushort)(((hi << 8) + lo) >> pad);
+                    return result;
+                }
+
+                /// <summary>set the luminance value to the specified coordinates.</summary>
+                public static void SetValue(byte[] buffer, int bits, int width, int height, int x, int y, ushort value)
+                {
+                    //             [HI BYTE] [LO BYTE]
+                    // ADC 08bit : 1111 1111 xxxx xxxx : max=255,  pad=8.
+                    // ADC 10bit : 1111 1111 11xx xxxx : max=1023, pad=6.
+                    // ADC 12bit : 1111 1111 1111 xxxx : max=4095, pad=4.
+                    //int max = (0x01 << bits) - 1;
+                    int pad = 16 - bits;
+
+                    int stride = width * 2;
+                    int bufptr = stride * y;
+                    byte lo = (byte)((value << pad) & 0xFF);
+                    byte hi = (byte)((value << pad) >> 8);
+                    buffer[bufptr + (x * 2) + 0] = lo;
+                    buffer[bufptr + (x * 2) + 1] = hi;
+                }
+            }
         }
 
         /// <summary>
