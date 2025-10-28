@@ -234,7 +234,7 @@ namespace GitHub.secile.Video
             // +--------------------+  +----------------+  +---------------+
             //                                 ↓GetBitmap()
             {
-                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_CAPTURE);
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_CAPTURE, format);
                 if (sample != null)
                 {
                     // release when finish.
@@ -283,7 +283,7 @@ namespace GitHub.secile.Video
                 // and often the still image is of higher quality than the images produced by the capture stream.
                 // The camera may have a button that acts as a hardware trigger, or it may support software triggering.
                 // A camera that supports still images will expose a still image pin, which is pin category PIN_CATEGORY_STILL.
-                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_STILL);
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_STILL, format);
                 if (sample != null)
                 {
                     // release when finish.
@@ -388,7 +388,7 @@ namespace GitHub.secile.Video
             // preview by PreviewCaptured.(issue #18)
             SetPreviewCallbackMain = () =>
             {
-                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_PREVIEW);
+                var sample = ConnectSampleGrabberAndRenderer(graph, builder, vcap_source, DirectShow.DsGuid.PIN_CATEGORY_PREVIEW, format);
                 if (sample != null)
                 {
                     // release when finish.
@@ -423,12 +423,12 @@ namespace GitHub.secile.Video
             public int Stride { get; set; }
         }
 
-        private SampleGrabberInfo ConnectSampleGrabberAndRenderer(DirectShow.IFilterGraph graph, DirectShow.ICaptureGraphBuilder2 builder, DirectShow.IBaseFilter vcap_source, Guid pinCategory)
+        private SampleGrabberInfo ConnectSampleGrabberAndRenderer(DirectShow.IFilterGraph graph, DirectShow.ICaptureGraphBuilder2 builder, DirectShow.IBaseFilter vcap_source, Guid pinCategory, VideoFormat format)
         {
             //------------------------------
             // SampleGrabber
             //------------------------------
-            var grabber = CreateSampleGrabber();
+            var grabber = CreateSampleGrabber(format);
             graph.AddFilter(grabber, "SampleGrabber");
             var i_grabber = (DirectShow.ISampleGrabber)grabber;
             i_grabber.SetBufferSamples(true);
@@ -455,7 +455,15 @@ namespace GitHub.secile.Video
                 return null;
             }
 
-            // SampleGrabber Format.
+            // after render stream, retrieve SampleGrabber image information.
+            // stride changes depending on VideoFormat.
+            // +--------------+-----------------+-----------+
+            // | Video Format | Sample Grabber  | Stride    |
+            // +--------------+-----------------+-----------+
+            // | Y800         | do not convert  | width * 1 |
+            // | Y16          | do not convert  | width * 2 |
+            // | else         | RGB24(bottomup) | width * 3 |
+            // +--------------+-----------------+-----------+
             {
                 var mt = new DirectShow.AM_MEDIA_TYPE();
                 i_grabber.GetConnectedMediaType(mt);
@@ -886,7 +894,7 @@ namespace GitHub.secile.Video
         /// <summary>
         /// サンプルグラバを作成する
         /// </summary>
-        private DirectShow.IBaseFilter CreateSampleGrabber()
+        private DirectShow.IBaseFilter CreateSampleGrabber(VideoFormat format)
         {
             var filter = DirectShow.CreateFilter(DirectShow.DsGuid.CLSID_SampleGrabber);
             var ismp = filter as DirectShow.ISampleGrabber;
@@ -908,7 +916,26 @@ namespace GitHub.secile.Video
 
             var mt = new DirectShow.AM_MEDIA_TYPE();
             mt.MajorType = DirectShow.DsGuid.MEDIATYPE_Video;
-            mt.SubType = DirectShow.DsGuid.MEDIASUBTYPE_RGB24;
+
+            // サンプル グラバは、指定されたメディア タイプを使って接続するだけなので、
+            // グラフを作成するときにフィルタ グラフ マネージャのインテリジェント接続メカニズムを利用できる。
+            // たとえば、非圧縮ビデオを指定した場合、ソース フィルタをサンプル グラバに接続すると、
+            // フィルタ グラフ マネージャは自動的にファイル パーサーとデコーダを追加する。
+
+            // Y8, Y800, Y16の場合は変換せず、データをそのまま受け取る。その他の場合はRGB24に変換する。
+            // Y8, Y800, Y16, do not convert the data, else convert to RGB24.
+            if (format.SubType == DirectShow.DsGuid.GetNickname(DirectShow.DsGuid.MEDIASUBTYPE_Y8) ||
+                format.SubType == DirectShow.DsGuid.GetNickname(DirectShow.DsGuid.MEDIASUBTYPE_Y800) ||
+                format.SubType == DirectShow.DsGuid.GetNickname(DirectShow.DsGuid.MEDIASUBTYPE_Y16))
+            {
+                // mt.SubType is already Guid.Empty.
+                // mt.SubType = Guid.Empty;
+            }
+            else
+            {
+                mt.SubType = DirectShow.DsGuid.MEDIASUBTYPE_RGB24;
+            }
+
             ismp.SetMediaType(mt);
             return filter;
         }
@@ -2018,13 +2045,18 @@ namespace GitHub.secile.Video
 
             // SubType
             public static readonly Guid MEDIASUBTYPE_None = new Guid("{E436EB8E-524F-11CE-9F53-0020AF0BA770}");
-            public static readonly Guid MEDIASUBTYPE_YUYV = new Guid("{56595559-0000-0010-8000-00AA00389B71}");
-            public static readonly Guid MEDIASUBTYPE_IYUV = new Guid("{56555949-0000-0010-8000-00AA00389B71}");
-            public static readonly Guid MEDIASUBTYPE_YVU9 = new Guid("{39555659-0000-0010-8000-00AA00389B71}");
-            public static readonly Guid MEDIASUBTYPE_YUY2 = new Guid("{32595559-0000-0010-8000-00AA00389B71}");
-            public static readonly Guid MEDIASUBTYPE_YVYU = new Guid("{55595659-0000-0010-8000-00AA00389B71}");
-            public static readonly Guid MEDIASUBTYPE_UYVY = new Guid("{59565955-0000-0010-8000-00AA00389B71}");
-            public static readonly Guid MEDIASUBTYPE_MJPG = new Guid("{47504A4D-0000-0010-8000-00AA00389B71}");
+            public static readonly Guid MEDIASUBTYPE_YUYV = new Guid("{56595559-0000-0010-8000-00AA00389B71}"); // 59555956 = 'YUYV'
+            public static readonly Guid MEDIASUBTYPE_IYUV = new Guid("{56555949-0000-0010-8000-00AA00389B71}"); // 49595556 = 'IYUV'
+            public static readonly Guid MEDIASUBTYPE_YVU9 = new Guid("{39555659-0000-0010-8000-00AA00389B71}"); // 59555939 = 'YUY9'
+            public static readonly Guid MEDIASUBTYPE_YUY2 = new Guid("{32595559-0000-0010-8000-00AA00389B71}"); // 59555932 = 'YUY2'
+            public static readonly Guid MEDIASUBTYPE_YVYU = new Guid("{55595659-0000-0010-8000-00AA00389B71}"); // 59565955 = 'YVYU'
+            public static readonly Guid MEDIASUBTYPE_UYVY = new Guid("{59565955-0000-0010-8000-00AA00389B71}"); // 55595659 = 'UYVY'
+            public static readonly Guid MEDIASUBTYPE_Y800 = new Guid("{30303859-0000-0010-8000-00AA00389B71}"); // 59383030 = 'Y800'
+            public static readonly Guid MEDIASUBTYPE_Y8   = new Guid("{20203859-0000-0010-8000-00AA00389B71}"); // 59382020 = 'Y8  '
+            public static readonly Guid MEDIASUBTYPE_BY8  = new Guid("{20385942-0000-0010-8000-00AA00389B71}"); // 20385942 = 'BY8 '
+            public static readonly Guid MEDIASUBTYPE_Y16  = new Guid("{20363159-0000-0010-8000-00AA00389B71}"); // 59313620 = 'Y16 '
+            public static readonly Guid MEDIASUBTYPE_MJPG = new Guid("{47504A4D-0000-0010-8000-00AA00389B71}"); // 4D4A5047 = 'MJPG'
+            public static readonly Guid MEDIASUBTYPE_RGB64 = new Guid("{36424752-0000-0010-8000-00aa00389b71}");// 52474236 = 'RGB6'
             public static readonly Guid MEDIASUBTYPE_RGB565 = new Guid("{E436EB7B-524F-11CE-9F53-0020AF0BA770}");
             public static readonly Guid MEDIASUBTYPE_RGB555 = new Guid("{E436EB7C-524F-11CE-9F53-0020AF0BA770}");
             public static readonly Guid MEDIASUBTYPE_RGB24 = new Guid("{E436EB7D-524F-11CE-9F53-0020AF0BA770}");
