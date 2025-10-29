@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UsbCameraForms", "UsbCamera
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UsbCameraWpf", "UsbCameraWpf\UsbCameraWpf.csproj", "{1FF8AEC1-6727-4659-9273-435C1B0FD872}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UsbCameraByteArray", "UsbCameraByteArray\UsbCameraByteArray.csproj", "{B0F887EF-0F54-4176-9E3C-2BCB4B3C8667}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{1FF8AEC1-6727-4659-9273-435C1B0FD872}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1FF8AEC1-6727-4659-9273-435C1B0FD872}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1FF8AEC1-6727-4659-9273-435C1B0FD872}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B0F887EF-0F54-4176-9E3C-2BCB4B3C8667}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B0F887EF-0F54-4176-9E3C-2BCB4B3C8667}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B0F887EF-0F54-4176-9E3C-2BCB4B3C8667}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B0F887EF-0F54-4176-9E3C-2BCB4B3C8667}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
