@@ -4,7 +4,7 @@ With only single CSharp source code. No external library required.
 
 # How to use
 Add UsbCamera.cs to your project.  
-Following is how to use. see also SampleProject.  
+Following is how to use. see also [SampleProject](https://github.com/secile/UsbCamera/tree/master/SampleProject).  
 ```C#
 // [How to use]
 // check USB camera is available.
@@ -70,6 +70,38 @@ private static Bitmap BufferToBitmap(byte[] buffer, int width, int height)
     return result;
 }
 ```
+
+# Gray scale camera supports. (Experimental)
+It's now possible to use gray scale camera which buffer format is Y800, Y8, and Y16.  
+gray scale camera support is under experimental,
+If you have any opinion, please join issue [#46](https://github.com/secile/UsbCamera/issues/46).
+
+Y800(and Y8) is an 8-bit, Y16 is a 16-bit grayscale format.  
+To use these video format, please follow the steps below. or see also
+[sample code](https://github.com/secile/UsbCamera/blob/master/SampleProject/UsbCameraByteArray/Form1.cs)
+in SampleProject/UsbCameraByteArray.
+
+1. define 'USBCAMERA_BYTEARRAY' symbol, that makes GetBitmap() returns image data as byte array. in case on WPF, define 'USBCAMERA_WPF' symbol at a same time.
+2. select VideoFormat which SubType is Y800, Y8, or Y16.
+3. to preview the image, do not use SetPreviewControl on WinForms. use Timer and GetBitmap() on WinForms, or use PreviewCaptured on WPF.
+4. to show the image, you have to convert byte array to Bitmap(on WinForms) or BitmapSource(on WPF), use UsbCamera.ByteArrayUtility.Y800.CreateBitmap or UsbCamera.ByteArrayUtility.Y16.CreateBitmap function.
+
+```cs
+// do not use SetPreviewControl, use Timer and GetBitmap().
+var timer = new System.Timers.Timer(1000 / 30) { SynchronizingObject = this };
+timer.Elapsed += (s, ev) =>
+{
+    var buffer = (byte[])camera.GetBitmap(); // define 'USBCAMERA_BYTEARRAY' symbol, then GetBitmap() returns byte array of Y16 raw data.
+    var bmp = UsbCamera.ByteArrayUtility.Y16.CreateBitmap(buffer, 12, camera.Size.Width, camera.Size.Height); // convert it to Bitmap.
+    pictureBox1.Image = bmp;
+};
+```
+
+note on using Y16 buffer format.
+
+5. Y16 is a 16-bit grayscale format, but in general, C# Bitmap class is not able to handle 16-bit grayscale image properly. UsbCamera.ByteArrayUtility.Y16.CreateBitmap returns 8-bit grayscale image, which causes the lost of pixel bit depth. do not use the Bitmap to inspect the luminance value of image, use this only for preview.
+6. to inspect/manipulate the luminance value of specific coordinates from byte array, use UsbCamera.ByteArrayUtility.Y16.GetValue/SetValue function.
+7. Y16 video format has it's own bit depth(8, 10 or 12) and it's depend of your cameras spec. you must specify the bit depth as an argument when you call the UsbCamera.ByteArrayUtility.Y16.CreateBitmap, GetValue, SetValue function.
 
 # Show preview.
 There are 3 ways to show preview.
@@ -157,10 +189,6 @@ if (prop.Available && prop.CanAuto)
     prop.SetValue(DirectShow.CameraControlFlags.Auto, 0);
 }
 ```
-
-# Gray scale camera supports. (need your help)
-Currently, some gray scale camera that buffer type is Y800, Y8 or Y16 may not work fine.
-If you have the camera and have trouble, please join issue [#46](https://github.com/secile/UsbCamera/issues/46).
 
 # Special Thanks.
 This project make use of a part of source code of the project below. Thank you!   
