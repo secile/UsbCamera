@@ -18,22 +18,24 @@ using GitHub.secile.Video;
 // (1) define 'USBCAMERA_BYTEARRAY' symbol, that makes GetBitmap() returns image data as byte array.
 //     in case on WPF, define 'USBCAMERA_WPF' symbol at a same time.
 //
-// (2) to preview the image, do not use SetPreviewControl on WinForms.
+// (2) select VideoFormat which SubType is Y800, Y8, or Y16.
+//
+// (3) to preview the image, do not use SetPreviewControl on WinForms.
 //     use Timer and GetBitmap() on WinForms, or use PreviewCaptured on WPF.
 //
-// (3) to show the image, you have to convert byte array to Bitmap(on WinForms) or BitmapSource(on WPF),
+// (4) to show the image, you have to convert byte array to Bitmap(on WinForms) or BitmapSource(on WPF),
 //     use UsbCamera.ByteArrayUtility.Y800.CreateBitmap or UsbCamera.ByteArrayUtility.Y16.CreateBitmap function.
 //
 // note on using Y16 video format.
 //
-// (4) Y16 is a 16-bit grayscale format, but in general, C# Bitmap class is not able to handle 16-bit grayscale image properly.
+// (5) Y16 is a 16-bit grayscale format, but in general, C# Bitmap class is not able to handle 16-bit grayscale image properly.
 //     UsbCamera.ByteArrayUtility.Y16.CreateBitmap returns 8-bit grayscale image, which causes the lost of pixel bit depth.
 //     do not use the Bitmap to inspect the luminance value of image, use this only for preview.
 //
-// (5) to inspect/manipulate the luminance value of specific coordinates from byte array,
-//     use UsbCamera.ByteArrayUtility.Y800.GetValue/SetValue or UsbCamera.ByteArrayUtility.Y16.GetValue/SetValue function.
+// (6) to inspect/manipulate the luminance value of specific coordinates from byte array,
+//     use UsbCamera.ByteArrayUtility.Y16.GetValue/SetValue function.
 //
-// (6) Y16 video format has it's own bit depth(8, 10 or 12) and it's depend of your cameras spec.
+// (7) Y16 video format has it's own bit depth(8, 10 or 12) and it's depend of your cameras spec.
 //     you must specify the bit depth as an argument when you call the UsbCamera.ByteArrayUtility.Y16.CreateBitmap, GetValue, SetValue function.
 
 namespace UsbCameraByteArray
@@ -67,12 +69,12 @@ namespace UsbCameraByteArray
             // this closing event handler make sure that the instance is not subject to garbage collection.
             this.FormClosing += (s, ev) => camera.Release(); // release when close.
 
-            // show preview
+            // do not use SetPreviewControl, use Timer and GetBitmap().
             var timer = new System.Timers.Timer(1000 / 30) { SynchronizingObject = this };
             timer.Elapsed += (s, ev) =>
             {
-                var buffer = (byte[])camera.GetBitmap();
-                var bmp = UsbCamera.ByteArrayUtility.Y16.CreateBitmap(buffer, 12, camera.Size.Width, camera.Size.Height);
+                var buffer = (byte[])camera.GetBitmap(); // define 'USBCAMERA_BYTEARRAY' symbol, then GetBitmap() returns byte array of Y16 raw data.
+                var bmp = UsbCamera.ByteArrayUtility.Y16.CreateBitmap(buffer, 12, camera.Size.Width, camera.Size.Height); // convert it to Bitmap.
                 pictureBox1.Image = bmp;
             };
 
